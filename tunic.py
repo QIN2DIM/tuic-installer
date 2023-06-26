@@ -420,7 +420,7 @@ class TuicService:
 
     def status(self):
         logging.info("显示服务状态")
-        result = subprocess.run(f"systemctl is-active {self.name}", capture_output=True, text=True)
+        result = subprocess.run(f"systemctl is-active {self.name}".split(), capture_output=True, text=True)
         logging.info(f"TUIC service status: {result.stdout.strip()}")
 
     def remove(self, workstation: Path):
