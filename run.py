@@ -21,6 +21,8 @@ from typing import Dict, Literal, List, Any
 from urllib import request
 from urllib.request import urlretrieve
 from uuid import uuid4
+import getpass
+
 
 logging.basicConfig(
     level=logging.INFO, stream=sys.stdout, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -28,6 +30,9 @@ logging.basicConfig(
 
 if not sys.platform.startswith("linux"):
     logging.error(" Opps~ 你只能在 Linux 操作系统上运行该脚本")
+    sys.exit()
+if getpass.getuser() != "root":
+    logging.error(" Opps~ 你需要手动切换到 root 用户运行该脚本")
     sys.exit()
 
 LISTEN_PORT = 46676
