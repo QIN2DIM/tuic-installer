@@ -574,9 +574,6 @@ class Scaffold:
         # 移除可能残留的证书文件
         CertBot.remove(domain)
 
-        logging.info("移除脚本文件")
-        os.system(f"rm {__file__}")
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="TUIC Scaffold (Python3.8+)")
