@@ -448,16 +448,17 @@ class CertBot:
         self._domain = domain
 
     def run(self):
-        logging.info("移除證書殘影...")
         p = Path("/etc/letsencrypt/live/")
-        for k in os.listdir(p):
-            k_full = p.joinpath(k)
-            if (
-                not p.joinpath(self._domain).exists()
-                and k.startswith(f"{self._domain}-")
-                and k_full.is_dir()
-            ):
-                shutil.rmtree(k_full, ignore_errors=True)
+        if p.exists():
+            logging.info("移除證書殘影...")
+            for k in os.listdir(p):
+                k_full = p.joinpath(k)
+                if (
+                    not p.joinpath(self._domain).exists()
+                    and k.startswith(f"{self._domain}-")
+                    and k_full.is_dir()
+                ):
+                    shutil.rmtree(k_full, ignore_errors=True)
 
         logging.info("正在为解析到本机的域名申请免费证书")
         os.system("apt install certbot -y > /dev/null 2>&1")
