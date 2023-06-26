@@ -58,16 +58,17 @@ WantedBy=multi-user.target
 """
 
 TEMPLATE_PRINT_NEKORAY = """
-====== ↓↓ 在 NekoRay 中添加 tuic 节点 ↓↓ ======
-
-{nekoray_config}
-
-====== ↑↑ 在 NekoRay 中添加 tuic 节点 ↑↑ ======
 ====== ↓↓ 查看 NekoRay 配置文件 ↓↓ ======
 
 cat {path_to_nekoray_config}
 
 ====== ↑↑ 查看 NekoRay 配置文件 ↑↑ ======
+
+====== ↓↓ 在 NekoRay 中添加 tuic 节点 ↓↓ ======
+
+{nekoray_config}
+
+====== ↑↑ 在 NekoRay 中添加 tuic 节点 ↑↑ ======
 """
 
 
