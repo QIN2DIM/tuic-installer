@@ -15,6 +15,7 @@ import shutil
 import socket
 import subprocess
 import sys
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Literal, List, Any
@@ -505,10 +506,7 @@ class Scaffold:
         """
         domain = params.domain
         if not domain:
-            try:
-                domain = input("> 解析到本机的域名：")
-            except KeyboardInterrupt:
-                return
+            domain = input("> 解析到本机的域名：")
 
         # 检查域名是否可达
         # 检查域名指向的IP是否为本机公网IP
@@ -563,8 +561,7 @@ class Scaffold:
     def remove(params: argparse.Namespace):
         domain = params.domain
         if not domain:
-            logging.info("使用 `--domain` 参数指定要解绑的域名")
-            return
+            domain = input("> 解析到本机的域名：")
 
         project = Project()
         tuic = TuicService.build_from_template(path=project.tuic_service)
@@ -588,9 +585,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
     command = args.command
 
-    if command == "install":
-        Scaffold.install(params=args)
-    elif command == "remove":
-        Scaffold.remove(params=args)
-    else:
-        parser.print_help()
+    with suppress(KeyboardInterrupt):
+        if command == "install":
+            Scaffold.install(params=args)
+        elif command == "remove":
+            Scaffold.remove(params=args)
+        else:
+            parser.print_help()
