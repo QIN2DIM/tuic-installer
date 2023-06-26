@@ -442,25 +442,27 @@ class CertBot:
     @staticmethod
     def run(domain: str):
         logging.info("正在为解析到本机的域名申请免费证书")
-        os.system("apt install certbot -y")
-        os.system("systemctl stop nginx && nginx -s stop")
-        result = subprocess.run(
-            f"certbot certonly --standalone --register-unsafely-without-email -d {domain}".split(),
-            capture_output=True,
-            text=True,
-        )
-        output = result.stderr.strip()
-        if output:
-            logging.error(output)
-            if "168 hours" in output:
-                logging.warning(
-                    """
-                    一个域名每168小时只能申请5次免费证书，
-                    你可以为当前主机创建一条新的域名A纪录来解决这个问题。
-                    在解决这个问题之前你没有必要进入到后续的安装步骤。
-                    """
-                )
-                sys.exit()
+        os.system("apt install certbot -y > /dev/null")
+        os.system("systemctl stop nginx && nginx -s stop > /dev/null")
+        os.system(f"certbot certonly --standalone --register-unsafely-without-email -d {domain} > /dev/null 2>&1")
+
+        # result = subprocess.run(
+        #     f"certbot certonly --standalone --register-unsafely-without-email -d {domain}".split(),
+        #     capture_output=True,
+        #     text=True,
+        # )
+        # output = result.stderr.strip()
+        # if output:
+        #     logging.error(output)
+        #     if "168 hours" in output:
+        #         logging.warning(
+        #             """
+        #             一个域名每168小时只能申请5次免费证书，
+        #             你可以为当前主机创建一条新的域名A纪录来解决这个问题。
+        #             在解决这个问题之前你没有必要进入到后续的安装步骤。
+        #             """
+        #         )
+        #         sys.exit()
 
     @staticmethod
     def remove(domain: str):
