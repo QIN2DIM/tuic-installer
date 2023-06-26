@@ -562,12 +562,15 @@ class Scaffold:
         domain = params.domain
         if not domain:
             domain = input("> 解析到本机的域名：")
+        if not check_my_hostname(domain):
+            return
+        logging.info(f"解绑服务 - bind={domain}")
 
         project = Project()
-        tuic = TuicService.build_from_template(path=project.tuic_service)
 
         # 关停进程，注销系统服务，移除工作空间
-        tuic.remove(workstation=project.workstation)
+        TuicService.build_from_template(project.tuic_service).remove(project.workstation)
+
         # 移除可能残留的证书文件
         CertBot.remove(domain)
 
