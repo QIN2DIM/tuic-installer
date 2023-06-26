@@ -23,7 +23,7 @@ python3 <(curl -fsSL https://ros.services/tunic.py) install
 python3 <(curl -fsSL https://ros.services/tunic.py) remove
 ```
 
-###　客户端配置
+### 客户端配置
 
 `tuic-server` Service 部署完成后，脚本会在控制台打印相应的客户端配置模版。
 
