@@ -15,6 +15,7 @@ import shutil
 import socket
 import subprocess
 import sys
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Literal, List, Any
@@ -419,7 +420,7 @@ class TuicService:
 
     def status(self):
         logging.info("显示服务状态")
-        result = subprocess.run(f"systemctl is-active {self.name}", capture_output=True, text=True)
+        result = subprocess.run(f"systemctl is-active {self.name}".split(), capture_output=True, text=True)
         logging.info(f"TUIC service status: {result.stdout.strip()}")
 
     def remove(self, workstation: Path):
@@ -505,10 +506,7 @@ class Scaffold:
         """
         domain = params.domain
         if not domain:
-            try:
-                domain = input("> 解析到本机的域名：")
-            except KeyboardInterrupt:
-                return
+            domain = input("> 解析到本机的域名：")
 
         # 检查域名是否可达
         # 检查域名指向的IP是否为本机公网IP
@@ -563,14 +561,16 @@ class Scaffold:
     def remove(params: argparse.Namespace):
         domain = params.domain
         if not domain:
-            logging.info("使用 `--domain` 参数指定要解绑的域名")
+            domain = input("> 解析到本机的域名：")
+        if not check_my_hostname(domain):
             return
+        logging.info(f"解绑服务 - bind={domain}")
 
         project = Project()
-        tuic = TuicService.build_from_template(path=project.tuic_service)
 
         # 关停进程，注销系统服务，移除工作空间
-        tuic.remove(workstation=project.workstation)
+        TuicService.build_from_template(project.tuic_service).remove(project.workstation)
+
         # 移除可能残留的证书文件
         CertBot.remove(domain)
 
@@ -588,9 +588,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
     command = args.command
 
-    if command == "install":
-        Scaffold.install(params=args)
-    elif command == "remove":
-        Scaffold.remove(params=args)
-    else:
-        parser.print_help()
+    with suppress(KeyboardInterrupt):
+        if command == "install":
+            Scaffold.install(params=args)
+        elif command == "remove":
+            Scaffold.remove(params=args)
+        else:
+            parser.print_help()
