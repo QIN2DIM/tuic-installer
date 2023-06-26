@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import inspect
 import json
 import logging
@@ -15,6 +16,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,8 +24,6 @@ from typing import Dict, Literal, List, Any
 from urllib import request
 from urllib.request import urlretrieve
 from uuid import uuid4
-import getpass
-
 
 logging.basicConfig(
     level=logging.INFO, stream=sys.stdout, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -36,6 +36,7 @@ if getpass.getuser() != "root":
     logging.error(" Opps~ 你需要手动切换到 root 用户运行该脚本")
     sys.exit()
 
+URL = "https://github.com/EAimTY/tuic/releases/download/tuic-server-1.0.0/tuic-server-1.0.0-x86_64-unknown-linux-gnu"
 LISTEN_PORT = 46676
 host_ip = ""
 
@@ -399,16 +400,19 @@ class TuicService:
         os.system("systemctl daemon-reload")
         return cls(path=f"{path}")
 
-    @staticmethod
-    def download_tuic_server(save_path: Path):
-        url = "https://github.com/EAimTY/tuic/releases/download/tuic-server-1.0.0/tuic-server-1.0.0-x86_64-unknown-linux-gnu"
-        save_path = str(save_path)
-        logging.info(f"正在下载 tuic-server - {url=}")
-        urlretrieve(url, f"{save_path}")
-        logging.info(f"下载完毕 - {save_path=}")
-
-        os.system(f"chmod +x {save_path}")
-        logging.info(f"授予执行权限 - {save_path=}")
+    def download_tuic_server(self, save_path: Path):
+        save_path_ = str(save_path)
+        try:
+            urlretrieve(URL, f"{save_path_}")
+            logging.info(f"下载完毕 - {save_path_=}")
+        except OSError:
+            logging.info("服务正忙，尝试停止任务...")
+            self.stop()
+            time.sleep(0.5)
+            return self.download_tuic_server(save_path)
+        else:
+            os.system(f"chmod +x {save_path_}")
+            logging.info(f"授予执行权限 - {save_path_=}")
 
     def start(self):
         os.system(f"systemctl enable --now {self.name}")
@@ -420,13 +424,14 @@ class TuicService:
         os.system(f"systemctl stop {self.name}")
 
     def status(self):
-        logging.info("显示服务状态")
-        result = subprocess.run(f"systemctl is-active {self.name}".split(), capture_output=True, text=True)
-        logging.info(f"TUIC service status: {result.stdout.strip()}")
+        result = subprocess.run(
+            f"systemctl is-active {self.name}".split(), capture_output=True, text=True
+        )
+        logging.info(f"服务状态 - TUIC service status: {result.stdout.strip()}")
 
     def remove(self, workstation: Path):
         logging.info("注销系统服务")
-        os.system(f"systemctl disable --now {self.name}")
+        os.system(f"systemctl disable --now {self.name} > /dev/null 2>&1")
 
         logging.info("关停相关进程")
         os.system("pkill tuic")
@@ -439,36 +444,59 @@ class TuicService:
 
 
 class CertBot:
-    @staticmethod
-    def run(domain: str):
+    def __init__(self, domain: str):
+        self._domain = domain
+
+    def run(self):
+        logging.info("移除證書殘影...")
+        p = Path("/etc/letsencrypt/live/")
+        for k in os.listdir(p):
+            k_full = p.joinpath(k)
+            if (
+                not p.joinpath(self._domain).exists()
+                and k.startswith(f"{self._domain}-")
+                and k_full.is_dir()
+            ):
+                shutil.rmtree(k_full, ignore_errors=True)
+
         logging.info("正在为解析到本机的域名申请免费证书")
-        os.system("apt install certbot -y > /dev/null")
-        os.system("systemctl stop nginx && nginx -s stop > /dev/null")
-        os.system(f"certbot certonly --standalone --register-unsafely-without-email -d {domain} > /dev/null 2>&1")
+        os.system("apt install certbot -y > /dev/null 2>&1")
+        os.system("systemctl stop nginx > /dev/null 2>&1 && nginx -s stop")
+        p = subprocess.Popen(
+            f"certbot certonly --standalone --register-unsafely-without-email -d {self._domain}".split(),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+        )
+        p.stdin.write("y\n")
+        p.stdin.flush()
+        output = p.stderr.read().strip()
+        if output and "168 hours" in output:
+            logging.warning(
+                """
+                一个域名每168小时只能申请5次免费证书，
+                你可以为当前主机创建一条新的域名A纪录来解决这个问题。
+                在解决这个问题之前你没有必要进入到后续的安装步骤。
+                """
+            )
+            sys.exit()
 
-        # result = subprocess.run(
-        #     f"certbot certonly --standalone --register-unsafely-without-email -d {domain}".split(),
-        #     capture_output=True,
-        #     text=True,
-        # )
-        # output = result.stderr.strip()
-        # if output:
-        #     logging.error(output)
-        #     if "168 hours" in output:
-        #         logging.warning(
-        #             """
-        #             一个域名每168小时只能申请5次免费证书，
-        #             你可以为当前主机创建一条新的域名A纪录来解决这个问题。
-        #             在解决这个问题之前你没有必要进入到后续的安装步骤。
-        #             """
-        #         )
-        #         sys.exit()
-
-    @staticmethod
-    def remove(domain: str):
+    def remove(self):
+        """可能存在重复申请的 domain-0001"""
         logging.info("移除可能残留的证书文件")
-        os.system(f"certbot delete --cert-name {domain}")
-        shutil.rmtree(Path(Certificate(domain).fullchain).parent, ignore_errors=True)
+        p = subprocess.Popen(
+            f"certbot delete --cert-name {self._domain}".split(),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+        )
+        p.stdin.write("y\n")
+        p.stdin.flush()
+
+        # 兜底
+        shutil.rmtree(Path(Certificate(self._domain).fullchain).parent, ignore_errors=True)
 
 
 def from_dict_to_dataclass(cls, data):
@@ -522,12 +550,13 @@ class Scaffold:
 
         # 为绑定到本机的域名申请证书
         if not Path(cert.fullchain).exists():
-            CertBot.run(domain)
+            CertBot(domain).run()
         else:
             logging.info("证书文件已存在")
 
         # 初始化 workstation
         project = Project()
+
         # 初始化系统服务配置
         template = TEMPLATE_SERVICE.format(
             exec_start=f"{project.tuic_executable} -c {project.server_config}",
@@ -545,7 +574,7 @@ class Scaffold:
         client_config = ClientConfig.gen_for_nekoray(relay, server_addr=domain, server_ip=host_ip)
         client_config.to_json(save_path=str(project.client_nekoray_config))
 
-        # 将 tuic-server 下载至 project workstation
+        logging.info(f"正在下载 tuic-server")
         tuic.download_tuic_server(save_path=project.tuic_executable)
 
         logging.info("正在部署系统服务")
@@ -571,11 +600,11 @@ class Scaffold:
 
         project = Project()
 
+        # 移除可能残留的证书文件
+        CertBot(domain).remove()
+
         # 关停进程，注销系统服务，移除工作空间
         TuicService.build_from_template(project.tuic_service).remove(project.workstation)
-
-        # 移除可能残留的证书文件
-        CertBot.remove(domain)
 
 
 if __name__ == "__main__":
