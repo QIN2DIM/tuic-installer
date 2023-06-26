@@ -461,8 +461,11 @@ class CertBot:
                     shutil.rmtree(k_full, ignore_errors=True)
 
         logging.info("正在为解析到本机的域名申请免费证书")
+        logging.info("安装 certbot")
         os.system("apt install certbot -y > /dev/null 2>&1")
+        logging.info("检查 80 端口占用")
         os.system("systemctl stop nginx > /dev/null 2>&1 && nginx -s stop")
+        logging.info("开始申请证书")
         p = subprocess.Popen(
             f"certbot certonly --standalone --register-unsafely-without-email -d {self._domain}".split(),
             stdin=subprocess.PIPE,
@@ -470,7 +473,7 @@ class CertBot:
             stderr=subprocess.PIPE,
             universal_newlines=True,
         )
-        p.stdin.write("y\n")
+        p.stdin.write("a\n")
         p.stdin.flush()
         output = p.stderr.read().strip()
         if output and "168 hours" in output:
