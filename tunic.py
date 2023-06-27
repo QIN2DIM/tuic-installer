@@ -470,7 +470,7 @@ class CertBot:
             "certbot certonly "
             "--standalone "
             "--register-unsafely-without-email "
-            "--agrees-tos "
+            "--agree-tos "
             "-d {domain}"
         )
         p = subprocess.Popen(
