@@ -278,7 +278,7 @@ class ClientRelay:
     // - "quic": lossless UDP relay using QUIC streams, additional overhead is introduced
     // Default: "native"
     """
-    udp_relay_mode: Literal["native", "quic"] = "quic"
+    udp_relay_mode: Literal["native", "quic"] = "native"
 
     """
     // Optional. Congestion control algorithm, available options:
