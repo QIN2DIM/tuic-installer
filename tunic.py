@@ -466,15 +466,21 @@ class CertBot:
         logging.info("检查 80 端口占用")
         os.system("systemctl stop nginx > /dev/null 2>&1 && nginx -s stop")
         logging.info("开始申请证书")
+        cmd = (
+            "certbot certonly "
+            "--standalone "
+            "--register-unsafely-without-email "
+            "--agrees-tos "
+            "-d {domain}"
+        )
         p = subprocess.Popen(
-            f"certbot certonly --standalone --register-unsafely-without-email -d {self._domain}".split(),
+            cmd.format(domain=self._domain).split(),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             universal_newlines=True,
+            text=True,
         )
-        p.stdin.write("y\na\n")
-        p.stdin.flush()
         output = p.stderr.read().strip()
         if output and "168 hours" in output:
             logging.warning(
