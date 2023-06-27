@@ -473,7 +473,7 @@ class CertBot:
             stderr=subprocess.PIPE,
             universal_newlines=True,
         )
-        p.stdin.write("a\n")
+        p.stdin.write("y\na\n")
         p.stdin.flush()
         output = p.stderr.read().strip()
         if output and "168 hours" in output:
