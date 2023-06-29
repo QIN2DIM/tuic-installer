@@ -20,7 +20,7 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Literal, List, Any
+from typing import Dict, Literal, List, Any, NoReturn, Union, Tuple
 from urllib import request
 from urllib.request import urlretrieve
 from uuid import uuid4
@@ -38,7 +38,6 @@ if getpass.getuser() != "root":
 
 URL = "https://github.com/EAimTY/tuic/releases/download/tuic-server-1.0.0/tuic-server-1.0.0-x86_64-unknown-linux-gnu"
 LISTEN_PORT = 46676
-host_ip = ""
 
 TEMPLATE_SERVICE = """
 [Unit]
@@ -58,20 +57,6 @@ LimitNOFILE=infinity
 WantedBy=multi-user.target
 """
 
-TEMPLATE_PRINT_NEKORAY = """
-====== ↓↓ 查看 NekoRay 配置文件 ↓↓ ======
-
-cat {path_to_nekoray_config}
-
-====== ↑↑ 查看 NekoRay 配置文件 ↑↑ ======
-
-====== ↓↓ 在 NekoRay 中添加 tuic 节点 ↓↓ ======
-
-{nekoray_config}
-
-====== ↑↑ 在 NekoRay 中添加 tuic 节点 ↑↑ ======
-"""
-
 
 @dataclass
 class Project:
@@ -83,8 +68,18 @@ class Project:
 
     tuic_service = Path("/etc/systemd/system/tuic.service")
 
+    _server_ip = ""
+
     def __post_init__(self):
         os.makedirs(self.workstation, exist_ok=True)
+
+    @property
+    def server_ip(self):
+        return self._server_ip
+
+    @server_ip.setter
+    def server_ip(self, ip: str):
+        self._server_ip = ip
 
 
 @dataclass
@@ -227,7 +222,13 @@ class ServerConfig:
 
     @classmethod
     def from_json(cls, fp: Path):
-        return from_dict_to_dataclass(cls, json.loads(fp.read_text(encoding="utf8")))
+        data = json.loads(fp.read_text(encoding="utf8"))
+        return cls(
+            **{
+                key: (data[key] if val.default == val.empty else data.get(key, val.default))
+                for key, val in inspect.signature(cls).parameters.items()
+            }
+        )
 
     @classmethod
     def from_automation(
@@ -242,10 +243,9 @@ class ServerConfig:
         users = {user.username: user.password for user in users}
         return cls(server=server, users=users, certificate=path_fullchain, private_key=path_privkey)
 
-    def to_json(self, save_path):
-        with open(save_path, "w", encoding="utf8") as file:
-            json.dump(self.__dict__, file, indent=4, ensure_ascii=True)
-        logging.info(f"保存服务端配置文件 - {save_path=}")
+    def to_json(self, sp: Path):
+        sp.write_text(json.dumps(self.__dict__, indent=4, ensure_ascii=True))
+        logging.info(f"保存服务端配置文件 - save_path={sp}")
 
 
 @dataclass
@@ -382,10 +382,9 @@ class ClientConfig:
 
         return cls(relay=relay, local=local)
 
-    def to_json(self, save_path):
-        with open(save_path, "w", encoding="utf8") as file:
-            json.dump(self.__dict__, file, indent=4, ensure_ascii=True)
-        logging.info(f"保存服务端配置文件 - {save_path=}")
+    def to_json(self, sp: Path):
+        sp.write_text(json.dumps(self.__dict__, indent=4, ensure_ascii=True))
+        logging.info(f"保存服务端配置文件 - save_path{sp}")
 
 
 @dataclass
@@ -415,6 +414,7 @@ class TuicService:
             logging.info(f"授予执行权限 - {save_path_=}")
 
     def start(self):
+        """部署服务之前需要先初始化服务端配置并将其写到工作空间"""
         os.system(f"systemctl enable --now {self.name}")
         logging.info("系统服务已启动")
         logging.info("已设置服务开机自启")
@@ -423,11 +423,18 @@ class TuicService:
         logging.info("停止系统服务")
         os.system(f"systemctl stop {self.name}")
 
-    def status(self):
+    def status(self) -> Tuple[bool, str]:
         result = subprocess.run(
             f"systemctl is-active {self.name}".split(), capture_output=True, text=True
         )
-        logging.info(f"服务状态 - TUIC service status: {result.stdout.strip()}")
+        text = result.stdout.strip()
+        response = None
+        if text == "inactive":
+            text = "\033[91m" + text + "\033[0m"
+        elif text == "active":
+            text = "\033[32m" + text + "\033[0m"
+            response = True
+        return response, text
 
     def remove(self, workstation: Path):
         logging.info("注销系统服务")
@@ -509,28 +516,66 @@ class CertBot:
         shutil.rmtree(Path(Certificate(self._domain).fullchain).parent, ignore_errors=True)
 
 
-def from_dict_to_dataclass(cls, data):
-    return cls(
-        **{
-            key: (data[key] if val.default == val.empty else data.get(key, val.default))
-            for key, val in inspect.signature(cls).parameters.items()
-        }
-    )
+# =================================== DataModel ===================================
+TEMPLATE_PRINT_NEKORAY = """
+====== ↓↓ 在 NekoRay 中添加 tuic 节点 ↓↓ ======
+
+{nekoray_config}
+
+====== ↑↑ 在 NekoRay 中添加 tuic 节点 ↑↑ ======
+"""
 
 
-def check_my_hostname(domain: str):
-    global host_ip
+def gen_clients(
+    server_addr: str,
+    user: User,
+    server_config: ServerConfig,
+    project: Project,
+    client: Literal["NekoRay", "v2rayN", "clash-meta"],
+):
+    """
+    :param client:
+    :param server_addr:
+    :param user:
+    :param server_config:
+    :param project:
+    :return:
+    """
+    relay = ClientRelay.copy_from_server(server_addr, user, server_config)
+
+    logging.info(f"正在生成对应的客户端配置 - {client=}")
+    if client == "NekoRay":
+        client_config = ClientConfig.gen_for_nekoray(relay, server_addr, project.server_ip)
+        client_config.to_json(project.client_nekoray_config)
+        logging.info(
+            TEMPLATE_PRINT_NEKORAY.format(
+                nekoray_config=json.dumps(client_config.__dict__, indent=4)
+            )
+        )
+
+
+def _validate_domain(domain: str | None) -> Union[NoReturn, Tuple[str, str]]:
+    """
+
+    :param domain:
+    :return: Tuple[domain, server_ip]
+    """
+    if not domain:
+        domain = input("> 解析到本机的域名：")
+
     try:
-        host_ip = socket.getaddrinfo(domain, None)[-1][4][0]
+        server_ip = socket.getaddrinfo(domain, None)[-1][4][0]
     except socket.gaierror:
         logging.error(f"域名不可达或拼写错误的域名 - {domain=}")
-        return False
+    else:
+        my_ip = request.urlopen("http://ifconfig.me/ip").read().decode("utf8")
+        if my_ip != server_ip:
+            logging.error(f"你的主机外网IP与域名解析到的IP不一致 - {my_ip=} {domain=} {server_ip=}")
+        else:
+            return domain, server_ip
 
-    my_ip = request.urlopen("http://ifconfig.me/ip").read().decode("utf8")
-    if my_ip != host_ip:
-        logging.error(f"你的主机外网IP与域名解析到的IP不一致 - {my_ip=} {domain=} {host_ip=}")
-        return False
-    return True
+    # 域名解析错误，应当阻止用户执行安装脚本
+    sys.exit()
 
 
 class Scaffold:
@@ -545,14 +590,7 @@ class Scaffold:
         :param params:
         :return:
         """
-        domain = params.domain
-        if not domain:
-            domain = input("> 解析到本机的域名：")
-
-        # 检查域名是否可达
-        # 检查域名指向的IP是否为本机公网IP
-        if not check_my_hostname(domain):
-            return
+        (domain, server_ip) = _validate_domain(params.domain)
         logging.info(f"域名解析成功 - {domain=}")
 
         # 初始化证书对象
@@ -566,46 +604,37 @@ class Scaffold:
 
         # 初始化 workstation
         project = Project()
+        user = User.gen()
 
         # 初始化系统服务配置
+        project.server_ip = server_ip
         template = TEMPLATE_SERVICE.format(
             exec_start=f"{project.tuic_executable} -c {project.server_config}",
             working_directory=f"{project.workstation}",
         )
         tuic = TuicService.build_from_template(path=project.tuic_service, template=template)
 
-        logging.info("正在生成默认的服务端配置")
-        user = User.gen()
-        server_config = ServerConfig.from_automation(user, cert.fullchain, cert.privkey)
-        server_config.to_json(save_path=str(project.server_config))
-
-        logging.info("正在生成对应的 NekoRay 客户端配置")
-        relay = ClientRelay.copy_from_server(domain, user, server_config)
-        client_config = ClientConfig.gen_for_nekoray(relay, server_addr=domain, server_ip=host_ip)
-        client_config.to_json(save_path=str(project.client_nekoray_config))
-
         logging.info(f"正在下载 tuic-server")
-        tuic.download_tuic_server(save_path=project.tuic_executable)
+        tuic.download_tuic_server(project.tuic_executable)
+
+        logging.info("正在生成默认的服务端配置")
+        server_config = ServerConfig.from_automation(user, cert.fullchain, cert.privkey)
+        server_config.to_json(project.server_config)
 
         logging.info("正在部署系统服务")
         tuic.start()
-        tuic.status()
+
+        logging.info("正在检查服务状态")
+        (response, text) = tuic.status()
 
         # 在控制台输出客户端配置
-        logging.info(
-            TEMPLATE_PRINT_NEKORAY.format(
-                nekoray_config=json.dumps(client_config.__dict__, indent=4),
-                path_to_nekoray_config=str(project.client_nekoray_config),
-            )
-        )
+        if response is True:
+            gen_clients(domain, user, server_config, project, client="NekoRay")
+        logging.info(f"服务状态 - TUIC service status: {text}")
 
     @staticmethod
     def remove(params: argparse.Namespace):
-        domain = params.domain
-        if not domain:
-            domain = input("> 解析到本机的域名：")
-        if not check_my_hostname(domain):
-            return
+        (domain, _) = _validate_domain(params.domain)
         logging.info(f"解绑服务 - bind={domain}")
 
         project = Project()
@@ -617,7 +646,7 @@ class Scaffold:
         TuicService.build_from_template(project.tuic_service).remove(project.workstation)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__": 
     parser = argparse.ArgumentParser(description="TUIC Scaffold (Python3.8+)")
     subparsers = parser.add_subparsers(dest="command")
 
