@@ -646,7 +646,7 @@ class Scaffold:
         TuicService.build_from_template(project.tuic_service).remove(project.workstation)
 
 
-if __name__ == "__main__": 
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="TUIC Scaffold (Python3.8+)")
     subparsers = parser.add_subparsers(dest="command")
 
