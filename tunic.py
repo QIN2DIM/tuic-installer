@@ -65,6 +65,7 @@ class Project:
     server_config = workstation.joinpath("server_config.json")
 
     client_nekoray_config = workstation.joinpath("nekoray_config.json")
+    client_meta_config = workstation.joinpath("meta_config.yaml")
 
     tuic_service = Path("/etc/systemd/system/tuic.service")
 
@@ -518,11 +519,19 @@ class CertBot:
 
 # =================================== DataModel ===================================
 TEMPLATE_PRINT_NEKORAY = """
-====== ↓↓ 在 NekoRay 中添加 tuic 节点 ↓↓ ======
+\033[36m--> NekoRay 自定义核心配置\033[0m
+# 名称：(custom)
+# 地址：{server_addr}
+# 端口：{listen_port}
+# 命令：-c %config%
+# 核心：tuic
 
 {nekoray_config}
+"""
 
-====== ↑↑ 在 NekoRay 中添加 tuic 节点 ↑↑ ======
+TEMPLATE_PRINT_META = """
+\033[36m--> Clash.Meta 配置文件输出路径\033[0m
+{meta_path}
 """
 
 
@@ -531,27 +540,31 @@ def gen_clients(
     user: User,
     server_config: ServerConfig,
     project: Project,
-    client: Literal["NekoRay", "v2rayN", "clash-meta"],
 ):
     """
-    :param client:
+    client: Literal["NekoRay", "v2rayN", "Meta"]
+
     :param server_addr:
     :param user:
     :param server_config:
     :param project:
     :return:
     """
+    logging.info("正在生成对应的客户端配置 - enable_clients=[NekoRay, v2rayN, Meta]")
+
     relay = ClientRelay.copy_from_server(server_addr, user, server_config)
 
-    logging.info(f"正在生成对应的客户端配置 - {client=}")
-    if client == "NekoRay":
-        client_config = ClientConfig.gen_for_nekoray(relay, server_addr, project.server_ip)
-        client_config.to_json(project.client_nekoray_config)
-        logging.info(
-            TEMPLATE_PRINT_NEKORAY.format(
-                nekoray_config=json.dumps(client_config.__dict__, indent=4)
-            )
+    client_config = ClientConfig.gen_for_nekoray(relay, server_addr, project.server_ip)
+    client_config.to_json(project.client_nekoray_config)
+    print(
+        TEMPLATE_PRINT_NEKORAY.format(
+            server_addr=server_addr,
+            listen_port=LISTEN_PORT,
+            nekoray_config=json.dumps(client_config.__dict__, indent=4)
         )
+    )
+
+    print(TEMPLATE_PRINT_META.format(meta_path=project.client_meta_config))
 
 
 def _validate_domain(domain: str | None) -> Union[NoReturn, Tuple[str, str]]:
@@ -629,8 +642,9 @@ class Scaffold:
 
         # 在控制台输出客户端配置
         if response is True:
-            gen_clients(domain, user, server_config, project, client="NekoRay")
-        logging.info(f"服务状态 - TUIC service status: {text}")
+            gen_clients(domain, user, server_config, project)
+        else:
+            logging.info(f"{text}")
 
     @staticmethod
     def remove(params: argparse.Namespace):
