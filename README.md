@@ -46,13 +46,17 @@ python3 <(curl -fsSL https://ros.services/tunic.py) remove
 
 >  Q：`send_window` 和 `receive_window` 是什么意思？它们如何影响 tuic 的流控行为？默认配置能否满足你的需求？如何计算合理取值？
 
->  Q：🤦‍♂️下饭时刻，**tuic** vs **hysteria (v1 / v2)** ！它们的区别是什么，普通开发者应该如何选择？
+>  Q：**tuic** vs **hysteria (v1 / v2)** ！它们的区别是什么，普通开发者应该如何选择？
+
+> Q：**tuic** 有 Rust (Origin) 和 Golang ([clash.meta](https://wiki.metacubex.one/config/proxies/tuic/)) 兩種實現，它们的区别是什么? 如何選擇
 
 ## RoadMap
 
 1. 添加更多的客户端配置模版（Priority: A+）
 
    - [x] NekoRay
+
+   - [x] clash.meta
 
    - [ ] v2rayN
 
