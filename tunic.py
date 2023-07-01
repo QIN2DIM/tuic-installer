@@ -57,6 +57,51 @@ LimitNOFILE=infinity
 WantedBy=multi-user.target
 """
 
+TEMPLATE_META_CONFIG = """
+mixed-port: 7890
+allow-lan: true
+bind-address: '*'
+geodata-mode: true
+global-client-fingerprint: random
+mode: rule
+log-level: info
+external-controller: '127.0.0.1:9090'
+dns:
+  enable: true
+  prefer-h3: true
+  listen: 0.0.0.0:53
+  ipv6: true
+  default-nameserver: [ 223.5.5.5, 8.8.8.8 ]
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  use-hosts: true
+  nameserver: [ 'https://doh.pub/dns-query', 'https://dns.alidns.com/dns-query', "quic://dns.adguard.com:784", "tls://223.5.5.5:853"]
+  fallback: [ 'https://8.8.8.8/dns-query', 'https://doh.dns.sb/dns-query', 'https://dns.cloudflare.com/dns-query', 'https://dns.twnic.tw/dns-query']
+  fallback-filter: { geoip: true, ipcidr: [ 240.0.0.0/4, 0.0.0.0/32 ] }
+rules:
+  - DOMAIN-SUFFIX,bing.com,PROXY
+  - DOMAIN-SUFFIX,openai.com,PROXY
+  - DOMAIN-SUFFIX,bing.cn,PROXY
+  - DOMAIN-SUFFIX,googleapis.com,PROXY
+  - GEOSITE,category-ads-all,REJECT
+  - DOMAIN-SUFFIX,appcenter.ms,REJECT
+  - DOMAIN-SUFFIX,app-measurement.com,REJECT
+  - DOMAIN-SUFFIX,firebase.io,REJECT
+  - DOMAIN-SUFFIX,crashlytics.com,REJECT
+  - DOMAIN-SUFFIX,google-analytics.com,REJECT
+  - GEOSITE,cn,DIRECT
+  - GEOIP,CN,DIRECT
+  - GEOIP,LAN,DIRECT
+  - MATCH,PROXY
+"""
+
+TEMPLATE_META_PROXY_ADDONS = """
+proxies:
+  - {proxy}
+proxy-groups:
+  - {proxy_group}
+"""
+
 
 @dataclass
 class Project:
@@ -94,6 +139,135 @@ class Certificate:
     @property
     def privkey(self):
         return f"/etc/letsencrypt/live/{self.domain}/privkey.pem"
+
+
+class CertBot:
+    def __init__(self, domain: str):
+        self._domain = domain
+
+    def run(self):
+        p = Path("/etc/letsencrypt/live/")
+        if p.exists():
+            logging.info("移除證書殘影...")
+            for k in os.listdir(p):
+                k_full = p.joinpath(k)
+                if (
+                    not p.joinpath(self._domain).exists()
+                    and k.startswith(f"{self._domain}-")
+                    and k_full.is_dir()
+                ):
+                    shutil.rmtree(k_full, ignore_errors=True)
+
+        logging.info("正在为解析到本机的域名申请免费证书")
+        logging.info("安装 certbot")
+        os.system("apt install certbot -y > /dev/null 2>&1")
+        logging.info("检查 80 端口占用")
+        os.system("systemctl stop nginx > /dev/null 2>&1 && nginx -s stop")
+        logging.info("开始申请证书")
+        cmd = (
+            "certbot certonly "
+            "--standalone "
+            "--register-unsafely-without-email "
+            "--agree-tos "
+            "-d {domain}"
+        )
+        p = subprocess.Popen(
+            cmd.format(domain=self._domain).split(),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            text=True,
+        )
+        output = p.stderr.read().strip()
+        if output and "168 hours" in output:
+            logging.warning(
+                """
+                一个域名每168小时只能申请5次免费证书，
+                你可以为当前主机创建一条新的域名A纪录来解决这个问题。
+                在解决这个问题之前你没有必要进入到后续的安装步骤。
+                """
+            )
+            sys.exit()
+
+    def remove(self):
+        """可能存在重复申请的 domain-0001"""
+        logging.info("移除可能残留的证书文件")
+        p = subprocess.Popen(
+            f"certbot delete --cert-name {self._domain}".split(),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+        )
+        p.stdin.write("y\n")
+        p.stdin.flush()
+
+        # 兜底
+        shutil.rmtree(Path(Certificate(self._domain).fullchain).parent, ignore_errors=True)
+
+
+@dataclass
+class TuicService:
+    path: str
+    name: str = "tuic"
+
+    @classmethod
+    def build_from_template(cls, path: Path, template: str | None = ""):
+        template = template.format()
+        path.write_text(template, encoding="utf8")
+        os.system("systemctl daemon-reload")
+        return cls(path=f"{path}")
+
+    def download_tuic_server(self, save_path: Path):
+        save_path_ = str(save_path)
+        try:
+            urlretrieve(URL, f"{save_path_}")
+            logging.info(f"下载完毕 - {save_path_=}")
+        except OSError:
+            logging.info("服务正忙，尝试停止任务...")
+            self.stop()
+            time.sleep(0.5)
+            return self.download_tuic_server(save_path)
+        else:
+            os.system(f"chmod +x {save_path_}")
+            logging.info(f"授予执行权限 - {save_path_=}")
+
+    def start(self):
+        """部署服务之前需要先初始化服务端配置并将其写到工作空间"""
+        os.system(f"systemctl enable --now {self.name}")
+        logging.info("系统服务已启动")
+        logging.info("已设置服务开机自启")
+
+    def stop(self):
+        logging.info("停止系统服务")
+        os.system(f"systemctl stop {self.name}")
+
+    def status(self) -> Tuple[bool, str]:
+        result = subprocess.run(
+            f"systemctl is-active {self.name}".split(), capture_output=True, text=True
+        )
+        text = result.stdout.strip()
+        response = None
+        if text == "inactive":
+            text = "\033[91m" + text + "\033[0m"
+        elif text == "active":
+            text = "\033[32m" + text + "\033[0m"
+            response = True
+        return response, text
+
+    def remove(self, workstation: Path):
+        logging.info("注销系统服务")
+        os.system(f"systemctl disable --now {self.name} > /dev/null 2>&1")
+
+        logging.info("关停相关进程")
+        os.system("pkill tuic")
+
+        logging.info("移除系统服务配置文件")
+        os.remove(self.path)
+
+        logging.info("移除工作空间")
+        shutil.rmtree(workstation)
 
 
 @dataclass
@@ -297,14 +471,14 @@ class ClientRelay:
     """
     [Optional] Maximum number of bytes to transmit to a peer without acknowledgment
     Should be set to at least the expected connection latency multiplied by the maximum desired throughput
-    Default: 8MiB * 2
+    Default: 8MiB * 2 
     """
     send_window: int = 16777216
 
     """
     [Optional]. Maximum number of bytes the peer may transmit without acknowledgement on any one stream before becoming blocked
     Should be set to at least the expected connection latency multiplied by the maximum desired throughput
-    Default: 8MiB
+    Default: 8MiB 
     """
     receive_window: int = 8388608
 
@@ -349,7 +523,7 @@ class ClientLocal:
 
 
 @dataclass
-class ClientConfig:
+class NekoRayConfig:
     """
     https://github.com/EAimTY/tuic/tree/dev/tuic-client
     Config template of tuic-client(v1.0.0)
@@ -361,7 +535,7 @@ class ClientConfig:
     log_level: Literal["warn", "info", "debug", "error"] = "warn"
 
     @classmethod
-    def gen_for_nekoray(cls, relay: ClientRelay, server_addr: str, server_ip: str | None = None):
+    def from_server(cls, relay: ClientRelay, server_addr: str, server_ip: str | None = None):
         """
 
         :param relay:
@@ -385,136 +559,62 @@ class ClientConfig:
 
     def to_json(self, sp: Path):
         sp.write_text(json.dumps(self.__dict__, indent=4, ensure_ascii=True))
-        logging.info(f"保存服务端配置文件 - save_path{sp}")
+
+    @property
+    def showcase(self) -> str:
+        return json.dumps(self.__dict__, indent=4, ensure_ascii=True)
 
 
 @dataclass
-class TuicService:
-    path: str
-    name: str = "tuic"
+class ClashMetaConfig:
+    # 在 meta_config.yaml 中的配置内容
+    contents: str
 
     @classmethod
-    def build_from_template(cls, path: Path, template: str | None = ""):
-        template = template.format()
-        path.write_text(template, encoding="utf8")
-        os.system("systemctl daemon-reload")
-        return cls(path=f"{path}")
+    def from_server(cls, relay: ClientRelay, server_addr: str, server_ip: str | None = None):
+        def from_string_to_yaml(s: str):
+            _suffix = ", "
+            fs = _suffix.join([i.strip() for i in s.split("\n") if i])
+            fs = fs[: len(fs) - len(_suffix)]
+            return "{ " + fs + " }"
 
-    def download_tuic_server(self, save_path: Path):
-        save_path_ = str(save_path)
-        try:
-            urlretrieve(URL, f"{save_path_}")
-            logging.info(f"下载完毕 - {save_path_=}")
-        except OSError:
-            logging.info("服务正忙，尝试停止任务...")
-            self.stop()
-            time.sleep(0.5)
-            return self.download_tuic_server(save_path)
-        else:
-            os.system(f"chmod +x {save_path_}")
-            logging.info(f"授予执行权限 - {save_path_=}")
+        def remove_empty_lines(s: str):
+            lines = s.split("\n")
+            non_empty_lines = [line for line in lines if line.strip()]
+            return "\n".join(non_empty_lines)
 
-    def start(self):
-        """部署服务之前需要先初始化服务端配置并将其写到工作空间"""
-        os.system(f"systemctl enable --now {self.name}")
-        logging.info("系统服务已启动")
-        logging.info("已设置服务开机自启")
+        name = "tunic"
 
-    def stop(self):
-        logging.info("停止系统服务")
-        os.system(f"systemctl stop {self.name}")
+        proxy = f"""
+        name: "{name}"
+        type: tuic
+        server: {server_addr}
+        port: 46676
+        uuid: {relay.uuid}
+        password: "{relay.password}"
+        ip: {server_ip or ''}
+        udp_relay_mode: {relay.udp_relay_mode}
+        congestion_control: {relay.congestion_control}
+        alpn: {relay.alpn}
+        """
 
-    def status(self) -> Tuple[bool, str]:
-        result = subprocess.run(
-            f"systemctl is-active {self.name}".split(), capture_output=True, text=True
-        )
-        text = result.stdout.strip()
-        response = None
-        if text == "inactive":
-            text = "\033[91m" + text + "\033[0m"
-        elif text == "active":
-            text = "\033[32m" + text + "\033[0m"
-            response = True
-        return response, text
+        proxy_group = f"""
+        name: PROXY
+        type: select
+        proxies: ["{name}"]
+        """
 
-    def remove(self, workstation: Path):
-        logging.info("注销系统服务")
-        os.system(f"systemctl disable --now {self.name} > /dev/null 2>&1")
+        proxy = from_string_to_yaml(proxy)
+        proxy_group = from_string_to_yaml(proxy_group)
 
-        logging.info("关停相关进程")
-        os.system("pkill tuic")
+        addons = TEMPLATE_META_PROXY_ADDONS.format(proxy=proxy, proxy_group=proxy_group)
+        contents = TEMPLATE_META_CONFIG + addons
+        contents = remove_empty_lines(contents)
 
-        logging.info("移除系统服务配置文件")
-        os.remove(self.path)
+        return cls(contents=contents)
 
-        logging.info("移除工作空间")
-        shutil.rmtree(workstation)
-
-
-class CertBot:
-    def __init__(self, domain: str):
-        self._domain = domain
-
-    def run(self):
-        p = Path("/etc/letsencrypt/live/")
-        if p.exists():
-            logging.info("移除證書殘影...")
-            for k in os.listdir(p):
-                k_full = p.joinpath(k)
-                if (
-                    not p.joinpath(self._domain).exists()
-                    and k.startswith(f"{self._domain}-")
-                    and k_full.is_dir()
-                ):
-                    shutil.rmtree(k_full, ignore_errors=True)
-
-        logging.info("正在为解析到本机的域名申请免费证书")
-        logging.info("安装 certbot")
-        os.system("apt install certbot -y > /dev/null 2>&1")
-        logging.info("检查 80 端口占用")
-        os.system("systemctl stop nginx > /dev/null 2>&1 && nginx -s stop")
-        logging.info("开始申请证书")
-        cmd = (
-            "certbot certonly "
-            "--standalone "
-            "--register-unsafely-without-email "
-            "--agree-tos "
-            "-d {domain}"
-        )
-        p = subprocess.Popen(
-            cmd.format(domain=self._domain).split(),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True,
-            text=True,
-        )
-        output = p.stderr.read().strip()
-        if output and "168 hours" in output:
-            logging.warning(
-                """
-                一个域名每168小时只能申请5次免费证书，
-                你可以为当前主机创建一条新的域名A纪录来解决这个问题。
-                在解决这个问题之前你没有必要进入到后续的安装步骤。
-                """
-            )
-            sys.exit()
-
-    def remove(self):
-        """可能存在重复申请的 domain-0001"""
-        logging.info("移除可能残留的证书文件")
-        p = subprocess.Popen(
-            f"certbot delete --cert-name {self._domain}".split(),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True,
-        )
-        p.stdin.write("y\n")
-        p.stdin.flush()
-
-        # 兜底
-        shutil.rmtree(Path(Certificate(self._domain).fullchain).parent, ignore_errors=True)
+    def to_yaml(self, sp: Path):
+        sp.write_text(self.contents + "\n")
 
 
 # =================================== DataModel ===================================
@@ -535,12 +635,7 @@ TEMPLATE_PRINT_META = """
 """
 
 
-def gen_clients(
-    server_addr: str,
-    user: User,
-    server_config: ServerConfig,
-    project: Project,
-):
+def gen_clients(server_addr: str, user: User, server_config: ServerConfig, project: Project):
     """
     client: Literal["NekoRay", "v2rayN", "Meta"]
 
@@ -550,20 +645,25 @@ def gen_clients(
     :param project:
     :return:
     """
-    logging.info("正在生成对应的客户端配置 - enable_clients=[NekoRay, v2rayN, Meta]")
+    logging.info("正在生成客户端配置文件")
 
+    # 生成客户端通用实例
     relay = ClientRelay.copy_from_server(server_addr, user, server_config)
 
-    client_config = ClientConfig.gen_for_nekoray(relay, server_addr, project.server_ip)
-    client_config.to_json(project.client_nekoray_config)
+    # 生成 NekoRay 客户端配置实例
+    # https://matsuridayo.github.io/n-extra_core/
+    nekoray = NekoRayConfig.from_server(relay, server_addr, project.server_ip)
+    nekoray.to_json(project.client_nekoray_config)
     print(
         TEMPLATE_PRINT_NEKORAY.format(
-            server_addr=server_addr,
-            listen_port=LISTEN_PORT,
-            nekoray_config=json.dumps(client_config.__dict__, indent=4)
+            server_addr=server_addr, listen_port=LISTEN_PORT, nekoray_config=nekoray.showcase
         )
     )
 
+    # 生成 Clash.Meta 客户端配置实例
+    # https://wiki.metacubex.one/config/proxies/tuic/
+    meta = ClashMetaConfig.from_server(relay, server_addr, project.server_ip)
+    meta.to_yaml(project.client_meta_config)
     print(TEMPLATE_PRINT_META.format(meta_path=project.client_meta_config))
 
 
