@@ -11,6 +11,7 @@ import inspect
 import json
 import logging
 import os
+import random
 import secrets
 import shutil
 import socket
@@ -37,7 +38,6 @@ if getpass.getuser() != "root":
     sys.exit()
 
 URL = "https://github.com/EAimTY/tuic/releases/download/tuic-server-1.0.0/tuic-server-1.0.0-x86_64-unknown-linux-gnu"
-LISTEN_PORT = 46676
 
 TEMPLATE_SERVICE = """
 [Unit]
@@ -61,23 +61,26 @@ TEMPLATE_META_CONFIG = """
 mixed-port: 7890
 allow-lan: true
 bind-address: '*'
-geodata-mode: true
-global-client-fingerprint: random
 mode: rule
 log-level: info
-external-controller: '127.0.0.1:9090'
+external-controller: '0.0.0.0:9090'
 dns:
   enable: true
   prefer-h3: true
   listen: 0.0.0.0:53
-  ipv6: true
-  default-nameserver: [ 223.5.5.5, 8.8.8.8 ]
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
-  use-hosts: true
-  nameserver: [ 'https://doh.pub/dns-query', 'https://dns.alidns.com/dns-query', "quic://dns.adguard.com:784", "tls://223.5.5.5:853"]
-  fallback: [ 'https://8.8.8.8/dns-query', 'https://doh.dns.sb/dns-query', 'https://dns.cloudflare.com/dns-query', 'https://dns.twnic.tw/dns-query']
-  fallback-filter: { geoip: true, ipcidr: [ 240.0.0.0/4, 0.0.0.0/32 ] }
+  default-nameserver:
+    - 223.5.5.5
+  nameserver:
+    - "tls://8.8.4.4#dns"
+    - "tls://1.0.0.1#dns"
+    - "quic://dns.adguard.com:784"
+    - "https://doh.pub/dns-query"
+  nameserver-policy:
+    "geosite:cn,private":
+      - "https://doh.pub/dns-query"
+      - "https://dns.alidns.com/dns-query"
 rules:
   - DOMAIN-SUFFIX,bing.com,PROXY
   - DOMAIN-SUFFIX,openai.com,PROXY
@@ -89,9 +92,12 @@ rules:
   - DOMAIN-SUFFIX,firebase.io,REJECT
   - DOMAIN-SUFFIX,crashlytics.com,REJECT
   - DOMAIN-SUFFIX,google-analytics.com,REJECT
-  - GEOSITE,cn,DIRECT
-  - GEOIP,CN,DIRECT
-  - GEOIP,LAN,DIRECT
+  - GEOSITE,icloud@cn,DIRECT
+  - GEOSITE,geolocation-cn,DIRECT
+  - GEOIP,telegram,PROXY,no-resolve
+  - GEOIP,private,DIRECT,no-resolve
+  - GEOSITE,CN,DIRECT
+  - GEOIP,cn,DIRECT
   - MATCH,PROXY
 """
 
@@ -115,9 +121,20 @@ class Project:
     tuic_service = Path("/etc/systemd/system/tuic.service")
 
     _server_ip = ""
+    _server_port = -1
 
     def __post_init__(self):
         os.makedirs(self.workstation, exist_ok=True)
+
+    @staticmethod
+    def is_port_in_used(_port: int, proto: Literal["tcp", "udp"]) -> bool | None:
+        """Check socket UDP/data_gram or TCP/data_stream"""
+        proto2type = {"tcp": socket.SOCK_STREAM, "udp": socket.SOCK_DGRAM}
+        socket_type = proto2type[proto]
+        with suppress(socket.error), socket.socket(socket.AF_INET, socket_type) as s:
+            s.bind(("127.0.0.1", _port))
+            return False
+        return True
 
     @property
     def server_ip(self):
@@ -126,6 +143,20 @@ class Project:
     @server_ip.setter
     def server_ip(self, ip: str):
         self._server_ip = ip
+
+    @property
+    def server_port(self):
+        # 初始化监听端口
+        if self._server_port < 0:
+            logging.info("正在初始化监听端口")
+            rand_ports = list(range(41670, 46990))
+            random.shuffle(rand_ports)
+            for p in rand_ports:
+                if not self.is_port_in_used(p, proto="udp"):
+                    self._server_port = p
+
+        # 返回已绑定的空闲端口
+        return self._server_port
 
 
 @dataclass
@@ -159,10 +190,19 @@ class CertBot:
                     shutil.rmtree(k_full, ignore_errors=True)
 
         logging.info("正在为解析到本机的域名申请免费证书")
+
+        logging.info("正在更新包索引")
+        os.system("apt update -y > /dev/null 2>&1 ")
+
         logging.info("安装 certbot")
         os.system("apt install certbot -y > /dev/null 2>&1")
+
         logging.info("检查 80 端口占用")
-        os.system("systemctl stop nginx > /dev/null 2>&1 && nginx -s stop")
+        if Project.is_port_in_used(80, proto="tcp"):
+            # 执行温和清理
+            os.system("systemctl stop nginx > /dev/null 2>&1 && nginx -s stop > /dev/null 2>&1")
+            os.system("kill $(lsof -t -i:80)  > /dev/null 2>&1")
+
         logging.info("开始申请证书")
         cmd = (
             "certbot certonly "
@@ -327,7 +367,7 @@ class ServerConfig:
     # WARNING: Disabling this is highly recommended, as it is vulnerable to replay attacks. See https://blog.cloudflare.com/even-faster-connection-establishment-with-quic-0-rtt-resumption/#attack-of-the-clones
     # Default: false
     """
-    zero_rtt_handshake: bool = False
+    zero_rtt_handshake: bool = True
 
     """
     [Optional] Set if the listening socket should be dual-stack
@@ -407,15 +447,12 @@ class ServerConfig:
 
     @classmethod
     def from_automation(
-        cls,
-        users: List[User] | User,
-        path_fullchain: str,
-        path_privkey: str,
-        server: str | None = f"[::]:{LISTEN_PORT}",
+        cls, users: List[User] | User, path_fullchain: str, path_privkey: str, server_port: int
     ):
         if not isinstance(users, list):
             users = [users]
         users = {user.username: user.password for user in users}
+        server = f"[::]:{server_port}"
         return cls(server=server, users=users, certificate=path_fullchain, private_key=path_privkey)
 
     def to_json(self, sp: Path):
@@ -447,13 +484,18 @@ class ClientRelay:
     ip: str | None = None
 
     """
+    Because this script implements the steps of automatic certificate application, this parameter will never be used.
+    """
+    certificates: List[str] | None = field(default_factory=list)
+
+    """
     // Optional. Set the UDP packet relay mode
     // Can be:
     // - "native": native UDP characteristics
     // - "quic": lossless UDP relay using QUIC streams, additional overhead is introduced
     // Default: "native"
     """
-    udp_relay_mode: Literal["native", "quic"] = "native"
+    udp_relay_mode: Literal["native", "quic"] = "quic"
 
     """
     // Optional. Congestion control algorithm, available options:
@@ -467,6 +509,14 @@ class ClientRelay:
     // Default being empty (no ALPN)
     """
     alpn: List[str] | None = field(default_factory=list)
+
+    """
+    // Optional. Enable 0-RTT QUIC connection handshake on the client side
+    // This is not impacting much on the performance, as the protocol is fully multiplexed
+    // WARNING: Disabling this is highly recommended, as it is vulnerable to replay attacks. See https://blog.cloudflare.com/even-faster-connection-establishment-with-quic-0-rtt-resumption/#attack-of-the-clones
+    // Default: false
+    """
+    zero_rtt_handshake: bool = True
 
     """
     [Optional] Maximum number of bytes to transmit to a peer without acknowledgment
@@ -496,10 +546,11 @@ class ClientRelay:
 
     def __post_init__(self):
         self.alpn = self.alpn or ["h3", "spdy/3.1"]
+        self.certificates = None
 
     @classmethod
-    def copy_from_server(cls, domain: str, user: User, sc: ServerConfig):
-        server = f"{domain}:{LISTEN_PORT}"
+    def copy_from_server(cls, domain: str, user: User, sc: ServerConfig, server_port: int):
+        server = f"{domain}:{server_port}"
         return cls(
             server=server,
             uuid=user.username,
@@ -535,17 +586,12 @@ class NekoRayConfig:
     log_level: Literal["warn", "info", "debug", "error"] = "warn"
 
     @classmethod
-    def from_server(cls, relay: ClientRelay, server_addr: str, server_ip: str | None = None):
-        """
-
-        :param relay:
-        :param server_addr: 服务器域名
-        :param server_ip: 服务器IP
-        :return:
-        """
+    def from_server(
+        cls, relay: ClientRelay, server_addr: str, server_port: int, server_ip: str | None = None
+    ):
         local = ClientLocal(server="127.0.0.1:%socks_port%")
 
-        relay.server = f"{server_addr}:{LISTEN_PORT}"
+        relay.server = f"{server_addr}:{server_port}"
 
         if server_ip is not None:
             relay.ip = server_ip
@@ -571,7 +617,9 @@ class ClashMetaConfig:
     contents: str
 
     @classmethod
-    def from_server(cls, relay: ClientRelay, server_addr: str, server_ip: str | None = None):
+    def from_server(
+        cls, relay: ClientRelay, server_addr: str, server_port: int, server_ip: str | None = None
+    ):
         def from_string_to_yaml(s: str):
             _suffix = ", "
             fs = _suffix.join([i.strip() for i in s.split("\n") if i])
@@ -585,19 +633,23 @@ class ClashMetaConfig:
 
         name = "tunic"
 
+        # https://wiki.metacubex.one/config/proxies/tuic/
         proxy = f"""
         name: "{name}"
         type: tuic
         server: {server_addr}
-        port: 46676
+        port: {server_port}
         uuid: {relay.uuid}
         password: "{relay.password}"
         ip: {server_ip or ''}
-        udp_relay_mode: {relay.udp_relay_mode}
-        congestion_control: {relay.congestion_control}
+        udp-relay-mode: {relay.udp_relay_mode}
+        congestion-controller: {relay.congestion_control}
         alpn: {relay.alpn}
+        reduce-rtt: {relay.zero_rtt_handshake}
+        max-udp-relay-packet-size: 1500
         """
 
+        # https://wiki.metacubex.one/config/proxy-groups/select/
         proxy_group = f"""
         name: PROXY
         type: select
@@ -648,21 +700,22 @@ def gen_clients(server_addr: str, user: User, server_config: ServerConfig, proje
     logging.info("正在生成客户端配置文件")
 
     # 生成客户端通用实例
-    relay = ClientRelay.copy_from_server(server_addr, user, server_config)
+    server_ip, server_port = project.server_ip, project.server_port
+    relay = ClientRelay.copy_from_server(server_addr, user, server_config, server_port)
 
     # 生成 NekoRay 客户端配置实例
     # https://matsuridayo.github.io/n-extra_core/
-    nekoray = NekoRayConfig.from_server(relay, server_addr, project.server_ip)
+    nekoray = NekoRayConfig.from_server(relay, server_addr, server_port, server_ip)
     nekoray.to_json(project.client_nekoray_config)
     print(
         TEMPLATE_PRINT_NEKORAY.format(
-            server_addr=server_addr, listen_port=LISTEN_PORT, nekoray_config=nekoray.showcase
+            server_addr=server_addr, listen_port=server_port, nekoray_config=nekoray.showcase
         )
     )
 
     # 生成 Clash.Meta 客户端配置实例
     # https://wiki.metacubex.one/config/proxies/tuic/
-    meta = ClashMetaConfig.from_server(relay, server_addr, project.server_ip)
+    meta = ClashMetaConfig.from_server(relay, server_addr, server_port, server_ip)
     meta.to_yaml(project.client_meta_config)
     print(TEMPLATE_PRINT_META.format(meta_path=project.client_meta_config))
 
@@ -718,6 +771,7 @@ class Scaffold:
         # 初始化 workstation
         project = Project()
         user = User.gen()
+        server_port = project.server_port
 
         # 初始化系统服务配置
         project.server_ip = server_ip
@@ -731,7 +785,9 @@ class Scaffold:
         tuic.download_tuic_server(project.tuic_executable)
 
         logging.info("正在生成默认的服务端配置")
-        server_config = ServerConfig.from_automation(user, cert.fullchain, cert.privkey)
+        server_config = ServerConfig.from_automation(
+            user, cert.fullchain, cert.privkey, server_port
+        )
         server_config.to_json(project.server_config)
 
         logging.info("正在部署系统服务")
