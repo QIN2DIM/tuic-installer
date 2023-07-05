@@ -57,18 +57,27 @@ LimitNOFILE=infinity
 WantedBy=multi-user.target
 """
 
-# Documentations:
-#  - 规则上游 https://github.com/Loyalsoldier/clash-rules#rule-providers-%E9%85%8D%E7%BD%AE%E6%96%B9%E5%BC%8F
-#  - 语法规则 https://wiki.metacubex.one/config/rules/rule-provider/#rule-set
-#  - 域名服务器查询策略 https://wiki.metacubex.one/config/dns/#nameserver-policy
-#    对 RULE-SET, GEOSITE, GEOIP 进行整合，分别指定 `远程 DNS` 和 `直连 DNS`
+"""
+## Documentations:
+
+尝试给出 2023 Clash.Meta 通用代理规则的最佳实践
+
+### Introduction
+1. 对 RULE-SET, GEOSITE, GEOIP 进行整合，分别指定 `远程 DNS` 和 `直连 DNS`。
+2. 至少需要在GUI（如 clash-verge） 中启用如下 `Clash 字段`，否则你可能无法正常访问互联网
+    - dns, proxies, proxy-groups, rules, rule-providers
+    
+### Warning 
+1. 配置文件中的字段优先级更高，会直接覆盖面板中的配置，也即，配置文件中没有写的以面板配置为准
+2. 该 Local 配置文件被用于 Clash.Meta 内核
+
+### Reference
+1. 规则上游 https://github.com/Loyalsoldier/clash-rules#rule-providers-%E9%85%8D%E7%BD%AE%E6%96%B9%E5%BC%8F
+2. 语法规则 https://wiki.metacubex.one/config/rules/rule-provider/#rule-set
+3. 域名服务器查询策略 https://wiki.metacubex.one/config/dns/#nameserver-policy
+4. 全球公有DNS服务器性能测试 https://www.dnsperf.com/
+"""
 TEMPLATE_META_CONFIG = """
-mixed-port: 7890
-allow-lan: true
-bind-address: '*'
-mode: rule
-log-level: info
-external-controller: '0.0.0.0:9090'
 dns:
   enable: true
   prefer-h3: true
@@ -79,12 +88,12 @@ dns:
     - 223.5.5.5
   nameserver:
     - "https://doh.pub/dns-query"
-    - "tls://dot.pub"
   nameserver-policy:
-    "geosite:cn,private":
-      - "https://223.5.5.5/dns-query"
     "rule-set:proxy,reject":
       - "https://8.8.8.8/dns-query"
+      - "quic://dns.adguard.com"
+    "geosite:cn,private":
+      - "https://223.5.5.5/dns-query"
     "rule-set:direct,icloud,apple":
       - "https://223.5.5.5/dns-query"
 rule-providers:
@@ -149,6 +158,7 @@ rule-providers:
     path: ./ruleset/applications.yaml
     interval: 86400
 rules:
+  - GEOSITE,cn,DIRECT
   - RULE-SET,applications,DIRECT
   - DOMAIN,clash.razord.top,DIRECT
   - DOMAIN,yacd.haishan.me,DIRECT
@@ -214,12 +224,13 @@ class Project:
     def server_port(self):
         # 初始化监听端口
         if self._server_port < 0:
-            logging.info("正在初始化监听端口")
             rand_ports = list(range(41670, 46990))
             random.shuffle(rand_ports)
             for p in rand_ports:
                 if not self.is_port_in_used(p, proto="udp"):
                     self._server_port = p
+                    logging.info(f"正在初始化监听端口 - port={p}")
+                    break
 
         # 返回已绑定的空闲端口
         return self._server_port
@@ -832,7 +843,7 @@ class Scaffold:
         if not Path(cert.fullchain).exists():
             CertBot(domain).run()
         else:
-            logging.info("证书文件已存在")
+            logging.info(f"证书文件已存在 - path={Path(cert.fullchain).parent}")
 
         # 初始化 workstation
         project = Project()
