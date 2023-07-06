@@ -89,6 +89,7 @@ dns:
     - https://223.5.5.5/dns-query
   nameserver:
     - "quic://dns.adguard.com"
+    - "https://dns.cloudflare.com/dns-query#h3=true"
 rule-providers:
   direct:
     type: http
