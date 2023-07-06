@@ -72,10 +72,11 @@ WantedBy=multi-user.target
 2. 该 Local 配置文件被用于 Clash.Meta 内核
 
 ### Reference
-1. 规则上游 https://github.com/Loyalsoldier/clash-rules#rule-providers-%E9%85%8D%E7%BD%AE%E6%96%B9%E5%BC%8F
-2. 语法规则 https://wiki.metacubex.one/config/rules/rule-provider/#rule-set
-3. 域名服务器查询策略 https://wiki.metacubex.one/config/dns/#nameserver-policy
-4. 全球公有DNS服务器性能测试 https://www.dnsperf.com/
+- [规则上游](https://github.com/Loyalsoldier/clash-rules#rule-providers-%E9%85%8D%E7%BD%AE%E6%96%B9%E5%BC%8F)
+- [语法规则](https://wiki.metacubex.one/config/rules/rule-provider/#rule-set) 
+- [Clash.Meta 的 DNS 工作流程](https://wiki.metacubex.one/config/dns/diagram/)
+- [域名服务器查询策略](https://wiki.metacubex.one/config/dns/#nameserver-policy)
+- [全球公有DNS服务器性能测试](https://www.dnsperf.com/)
 """
 TEMPLATE_META_CONFIG = """
 dns:
@@ -85,17 +86,9 @@ dns:
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
   default-nameserver:
-    - 223.5.5.5
+    - https://223.5.5.5/dns-query
   nameserver:
-    - "https://doh.pub/dns-query"
-  nameserver-policy:
-    "rule-set:proxy,reject":
-      - "https://8.8.8.8/dns-query"
-      - "quic://dns.adguard.com"
-    "geosite:cn,private":
-      - "https://223.5.5.5/dns-query"
-    "rule-set:direct,icloud,apple":
-      - "https://223.5.5.5/dns-query"
+    - "quic://dns.adguard.com"
 rule-providers:
   direct:
     type: http
@@ -158,8 +151,9 @@ rule-providers:
     path: ./ruleset/applications.yaml
     interval: 86400
 rules:
-  - GEOSITE,cn,DIRECT
   - RULE-SET,applications,DIRECT
+  - GEOSITE,cn,DIRECT
+  - GEOSITE,private,DIRECT
   - DOMAIN,clash.razord.top,DIRECT
   - DOMAIN,yacd.haishan.me,DIRECT
   - DOMAIN,services.googleapis.cn,PROXY
@@ -171,8 +165,8 @@ rules:
   - RULE-SET,apple,DIRECT
   - RULE-SET,lancidr,DIRECT
   - RULE-SET,cncidr,DIRECT
-  - RULE-SET,telegramcidr,PROXY
-  - GEOIP,LAN,DIRECT
+  - RULE-SET,telegramcidr,PROXY,no-resolve
+  - GEOIP,PRIVATE,DIRECT
   - GEOIP,CN,DIRECT
   - MATCH,PROXY
 """
@@ -723,7 +717,7 @@ class ClashMetaConfig:
         congestion-controller: {relay.congestion_control}
         alpn: {relay.alpn}
         reduce-rtt: {relay.zero_rtt_handshake}
-        max-udp-relay-packet-size: 1500
+        max-udp-relay-packet-size: 1464
         """
 
         # https://wiki.metacubex.one/config/proxy-groups/select/
