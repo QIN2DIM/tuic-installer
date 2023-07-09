@@ -57,9 +57,8 @@ LimitNOFILE=infinity
 WantedBy=multi-user.target
 """
 
-TEMPLATE_META_CONFIG = """
 # https://adguard-dns.io/kb/zh-CN/general/dns-providers
-
+TEMPLATE_META_CONFIG = """
 dns:
   enable: true
   prefer-h3: true
@@ -915,30 +914,40 @@ class Scaffold:
 
     @staticmethod
     def check(params: argparse.Namespace):
+        def print_nekoray():
+            if not project.client_nekoray_config.exists():
+                logging.error(f"❌ 客户端配置文件不存在 - path={project.client_nekoray_config}")
+            else:
+                nekoray = NekoRayConfig.from_json(project.client_nekoray_config)
+                server_addr, server_port = nekoray.relay.get("server", "").split(":")
+                print(
+                    TEMPLATE_PRINT_NEKORAY.format(
+                        server_addr=server_addr,
+                        listen_port=server_port,
+                        nekoray_config=nekoray.showcase,
+                    )
+                )
+
+        def print_clash_meta():
+            if not project.client_meta_config.exists():
+                logging.error(f"❌ 客户端配置文件不存在 - path={project.client_meta_config}")
+            else:
+                print(TEMPLATE_PRINT_META.format(meta_path=project.client_meta_config))
+                print("\033[36m--> Clash.Meta 配置信息\033[0m")
+                print(project.client_meta_config.read_text())
+
         project = Project()
 
-        # 输出 NekoRay 客户端配置信息
-        if not project.client_nekoray_config.exists():
-            logging.error(f"❌ 客户端配置文件不存在 - path={project.client_nekoray_config}")
-        else:
-            nekoray = NekoRayConfig.from_json(project.client_nekoray_config)
-            server_addr, server_port = nekoray.relay.get("server", "").split(":")
-            print(
-                TEMPLATE_PRINT_NEKORAY.format(
-                    server_addr=server_addr,
-                    listen_port=server_port,
-                    nekoray_config=nekoray.showcase,
-                )
-            )
-
-        # 输出 Clash.Meta 客户端配置信息
-        if not project.client_meta_config.exists():
-            logging.error(f"❌ 客户端配置文件不存在 - path={project.client_meta_config}")
-        else:
-            print(TEMPLATE_PRINT_META.format(meta_path=project.client_meta_config))
-            with suppress(AttributeError):
-                if params.verbose:
-                    print(project.client_meta_config.read_text())
+        show_all = not any([params.clash, params.nekoray, params.v2ray])
+        if show_all:
+            print_nekoray()
+            print_clash_meta()
+        elif params.nekoray:
+            print_nekoray()
+        elif params.clash:
+            print_clash_meta()
+        elif params.v2ray:
+            logging.warning("Unimplemented feature")
 
 
 if __name__ == "__main__":
@@ -952,7 +961,9 @@ if __name__ == "__main__":
     remove_parser.add_argument("-d", "--domain", type=str, help="传参指定域名，否则需要在运行脚本后以交互的形式输入")
 
     check_parser = subparsers.add_parser("check", help="Print client configuration")
-    check_parser.add_argument("-v", "--verbose", action="store_true", required=False, help="打印细节参数")
+    check_parser.add_argument("--nekoray", action="store_true", help="show NekoRay config")
+    check_parser.add_argument("--clash", action="store_true", help="show Clash.Meta config")
+    check_parser.add_argument("--v2ray", action="store_true", help="show v2rayN config")
 
     args = parser.parse_args()
     command = args.command
