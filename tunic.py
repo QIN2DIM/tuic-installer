@@ -179,6 +179,11 @@ class Project:
 
     tuic_service = Path("/etc/systemd/system/tuic.service")
 
+    # 设置别名
+    path_bash_aliases = Path("/root/.bash_aliases")
+    _remote_command = "python3 <(curl -fsSL https://ros.services/tunic.py)"
+    _alias = "tunic"
+
     _server_ip = ""
     _server_port = -1
 
@@ -217,6 +222,21 @@ class Project:
 
         # 返回已绑定的空闲端口
         return self._server_port
+
+    @property
+    def alias(self):
+        return f"alias {self._alias}='{self._remote_command}'"
+
+    def set_alias(self):
+        with open(self.path_bash_aliases, "a", encoding="utf8") as file:
+            file.write(f"\n{self.alias}\n")
+        logging.info(f"✅ 你可以在重启会话后通过别名唤起脚本 - alias={self._alias}")
+
+    def remove_alias(self):
+        text = self.path_bash_aliases.read_text(encoding="utf8")
+        for ck in [f"\n{self.alias}\n", f"\n{self.alias}", f"{self.alias}\n", self.alias]:
+            text = text.replace(ck, "")
+        self.path_bash_aliases.write_text(text, encoding="utf8")
 
 
 @dataclass
@@ -370,6 +390,7 @@ class TuicService:
         shutil.rmtree(workstation)
 
 
+# =================================== Runtime Settings ===================================
 @dataclass
 class User:
     username: str
@@ -830,6 +851,9 @@ class Scaffold:
 
         # 初始化 workstation
         project = Project()
+        # 设置脚本别名
+        project.set_alias()
+
         user = User.gen()
         server_port = project.server_port
 
@@ -868,6 +892,9 @@ class Scaffold:
         logging.info(f"解绑服务 - bind={domain}")
 
         project = Project()
+
+        # 移除脚本别名
+        project.remove_alias()
 
         # 移除可能残留的证书文件
         CertBot(domain).remove()
