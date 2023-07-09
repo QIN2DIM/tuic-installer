@@ -391,6 +391,17 @@ class TuicService:
 
 
 # =================================== Runtime Settings ===================================
+
+
+def from_dict_to_cls(cls, data):
+    return cls(
+        **{
+            key: (data[key] if val.default == val.empty else data.get(key, val.default))
+            for key, val in inspect.signature(cls).parameters.items()
+        }
+    )
+
+
 @dataclass
 class User:
     username: str
@@ -519,12 +530,7 @@ class ServerConfig:
     @classmethod
     def from_json(cls, fp: Path):
         data = json.loads(fp.read_text(encoding="utf8"))
-        return cls(
-            **{
-                key: (data[key] if val.default == val.empty else data.get(key, val.default))
-                for key, val in inspect.signature(cls).parameters.items()
-            }
-        )
+        return from_dict_to_cls(cls, data)
 
     @classmethod
     def from_automation(
@@ -683,6 +689,11 @@ class NekoRayConfig:
         relay = {k: relay[k] for k in relay if relay[k] is not None}
 
         return cls(relay=relay, local=local)
+
+    @classmethod
+    def from_json(cls, sp: Path):
+        data = json.loads(sp.read_text(encoding="utf8"))
+        return from_dict_to_cls(cls, data)
 
     def to_json(self, sp: Path):
         sp.write_text(json.dumps(self.__dict__, indent=4, ensure_ascii=True))
@@ -902,16 +913,46 @@ class Scaffold:
         # 关停进程，注销系统服务，移除工作空间
         TuicService.build_from_template(project.tuic_service).remove(project.workstation)
 
+    @staticmethod
+    def check(params: argparse.Namespace):
+        project = Project()
+
+        # 输出 NekoRay 客户端配置信息
+        if not project.client_nekoray_config.exists():
+            logging.error(f"❌ 客户端配置文件不存在 - path={project.client_nekoray_config}")
+        else:
+            nekoray = NekoRayConfig.from_json(project.client_nekoray_config)
+            server_addr, server_port = nekoray.relay.get("server", "").split(":")
+            print(
+                TEMPLATE_PRINT_NEKORAY.format(
+                    server_addr=server_addr,
+                    listen_port=server_port,
+                    nekoray_config=nekoray.showcase,
+                )
+            )
+
+        # 输出 Clash.Meta 客户端配置信息
+        if not project.client_meta_config.exists():
+            logging.error(f"❌ 客户端配置文件不存在 - path={project.client_meta_config}")
+        else:
+            print(TEMPLATE_PRINT_META.format(meta_path=project.client_meta_config))
+            with suppress(AttributeError):
+                if params.verbose:
+                    print(project.client_meta_config.read_text())
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="TUIC Scaffold (Python3.8+)")
     subparsers = parser.add_subparsers(dest="command")
 
-    install_parser = subparsers.add_parser("install", help="安装并自动运行 tuic-server")
+    install_parser = subparsers.add_parser("install", help="Automatically install and run")
     install_parser.add_argument("-d", "--domain", type=str, help="传参指定域名，否则需要在运行脚本后以交互的形式输入")
 
-    remove_parser = subparsers.add_parser("remove", help="移除绑定到指定域名的 tuic-server")
+    remove_parser = subparsers.add_parser("remove", help="Uninstall services and associated caches")
     remove_parser.add_argument("-d", "--domain", type=str, help="传参指定域名，否则需要在运行脚本后以交互的形式输入")
+
+    check_parser = subparsers.add_parser("check", help="Print client configuration")
+    check_parser.add_argument("-v", "--verbose", action="store_true", required=False, help="打印细节参数")
 
     args = parser.parse_args()
     command = args.command
@@ -921,5 +962,7 @@ if __name__ == "__main__":
             Scaffold.install(params=args)
         elif command == "remove":
             Scaffold.remove(params=args)
+        elif command == "check":
+            Scaffold.check(params=args)
         else:
             parser.print_help()
