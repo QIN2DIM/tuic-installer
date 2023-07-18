@@ -1,6 +1,6 @@
 # Tunic
 
-托尼老师的下饭时刻！一键部署 [tuic-server](https://github.com/EAimTY/tuic)
+一键部署 [tuic-server](https://github.com/EAimTY/tuic)！
 
 ## Prerequisites
 
@@ -33,4 +33,4 @@
 
 3. **Next step**
 
-   查看 [项目 WiKi](https://github.com/QIN2DIM/tuic-installer/wiki)，这里有你想知道的一切🐧
+   查看 [项目 WiKi](https://github.com/QIN2DIM/tuic-installer/wiki/Usage) 以获取完整的技术文档🐧
