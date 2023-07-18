@@ -75,8 +75,7 @@ dns:
     - "https://223.5.5.5/dns-query"
   nameserver-policy:
     "geosite:cn":
-      - "https://doh.pub/dns-query"
-      - "https://223.5.5.5/dns-query"
+      - system
 rule-providers:
   direct:
     type: http
