@@ -69,9 +69,11 @@ dns:
     - "quic://dns.adguard-dns.com"
   proxy-server-nameserver:
     - system
+    - https://223.5.5.5/dns-query
   nameserver-policy:
     "geosite:cn":
       - system
+      - https://223.5.5.5/dns-query
 rules:
   - GEOSITE,category-scholar-!cn,PROXY
   - GEOSITE,category-ads-all,REJECT
