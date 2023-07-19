@@ -58,104 +58,36 @@ WantedBy=multi-user.target
 """
 
 # https://adguard-dns.io/kb/zh-CN/general/dns-providers
+# https://github.com/MetaCubeX/Clash.Meta/blob/53f9e1ee7104473da2b4ff5da29965563084482d/config/config.go#L891
 TEMPLATE_META_CONFIG = """
 dns:
   enable: true
-  prefer-h3: true
-  listen: 0.0.0.0:53
   enhanced-mode: fake-ip
-  fake-ip-range: 198.18.0.1/16
-  default-nameserver:
-    - https://223.5.5.5/dns-query
   nameserver:
     - "https://dns.google/dns-query#PROXY"
     - "https://security.cloudflare-dns.com/dns-query#PROXY"
+    - "quic://dns.adguard-dns.com"
   proxy-server-nameserver:
-    - "https://doh.pub/dns-query"
-    - "https://223.5.5.5/dns-query"
+    - system
   nameserver-policy:
     "geosite:cn":
       - system
-rule-providers:
-  direct:
-    type: http
-    behavior: domain
-    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/direct.txt"
-    path: ./ruleset/direct.yaml
-    interval: 86400
-  proxy:
-    type: http
-    behavior: domain
-    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/proxy.txt"
-    path: ./ruleset/proxy.yaml
-    interval: 86400
-  reject:
-    type: http
-    behavior: domain
-    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/reject.txt"
-    path: ./ruleset/reject.yaml
-    interval: 86400
-  private:
-    type: http
-    behavior: domain
-    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/private.txt"
-    path: ./ruleset/private.yaml
-    interval: 86400
-  apple:
-    type: http
-    behavior: domain
-    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/apple.txt"
-    path: ./ruleset/apple.yaml
-    interval: 86400
-  icloud:
-    type: http
-    behavior: domain
-    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/icloud.txt"
-    path: ./ruleset/icloud.yaml
-    interval: 86400
-  telegramcidr:
-    type: http
-    behavior: ipcidr
-    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/telegramcidr.txt"
-    path: ./ruleset/telegramcidr.yaml
-    interval: 86400
-  lancidr:
-    type: http
-    behavior: ipcidr
-    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/lancidr.txt"
-    path: ./ruleset/lancidr.yaml
-    interval: 86400
-  cncidr:
-    type: http
-    behavior: ipcidr
-    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/cncidr.txt"
-    path: ./ruleset/cncidr.yaml
-    interval: 86400
-  applications:
-    type: http
-    behavior: classical
-    url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/applications.txt"
-    path: ./ruleset/applications.yaml
-    interval: 86400
 rules:
-  - RULE-SET,applications,DIRECT
+  - GEOSITE,category-scholar-!cn,PROXY
+  - GEOSITE,category-ads-all,REJECT
+  - GEOSITE,youtube,PROXY
+  - GEOSITE,google,PROXY
   - GEOSITE,cn,DIRECT
   - GEOSITE,private,DIRECT
-  - DOMAIN,clash.razord.top,DIRECT
-  - DOMAIN,yacd.haishan.me,DIRECT
-  - DOMAIN,services.googleapis.cn,PROXY
-  - RULE-SET,reject,REJECT
-  - RULE-SET,direct,DIRECT
-  - RULE-SET,private,DIRECT
-  - RULE-SET,proxy,PROXY
-  - RULE-SET,icloud,DIRECT
-  - RULE-SET,apple,DIRECT
-  - RULE-SET,lancidr,DIRECT
-  - RULE-SET,cncidr,DIRECT
-  - RULE-SET,telegramcidr,PROXY,no-resolve
-  - GEOIP,PRIVATE,DIRECT
+  - GEOSITE,tracker,DIRECT
+  - GEOSITE,steam@cn,DIRECT
+  - GEOSITE,category-games@cn,DIRECT
+  - GEOSITE,geolocation-!cn,PROXY
+  - GEOIP,private,DIRECT,no-resolve
+  - GEOIP,telegram,PROXY
   - GEOIP,CN,DIRECT
-  - MATCH,PROXY
+  - DST-PORT,80/8080/443/8443,PROXY
+  - MATCH,DIRECT
 """
 
 TEMPLATE_META_PROXY_ADDONS = """
