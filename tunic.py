@@ -81,7 +81,7 @@ rules:
   - GEOSITE,google,PROXY
   - GEOSITE,cn,DIRECT
   - GEOSITE,private,DIRECT
-  - GEOSITE,tracker,DIRECT
+  # - GEOSITE,tracker,DIRECT
   - GEOSITE,steam@cn,DIRECT
   - GEOSITE,category-games@cn,DIRECT
   - GEOSITE,geolocation-!cn,PROXY
