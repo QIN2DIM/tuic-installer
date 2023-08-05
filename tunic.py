@@ -41,17 +41,20 @@ URL = "https://github.com/EAimTY/tuic/releases/download/tuic-server-1.0.0/tuic-s
 
 TEMPLATE_SERVICE = """
 [Unit]
+Description=tuic Service
+Documentation=https://github.com/EAimTY/tuic
 After=network.target nss-lookup.target
 
 [Service]
+Type=simple
 User=root
-WorkingDirectory={working_directory}
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
 ExecStart={exec_start}
 Restart=on-failure
-RestartSec=10
+LimitNPROC=512
 LimitNOFILE=infinity
+WorkingDirectory={working_directory}
 
 [Install]
 WantedBy=multi-user.target
@@ -102,13 +105,13 @@ proxy-groups:
 @dataclass
 class Project:
     workstation = Path("/home/tuic-server")
-    tuic_executable = workstation.joinpath("tuic")
+    executable = workstation.joinpath("tuic")
     server_config = workstation.joinpath("server_config.json")
 
     client_nekoray_config = workstation.joinpath("nekoray_config.json")
     client_meta_config = workstation.joinpath("meta_config.yaml")
 
-    tuic_service = Path("/etc/systemd/system/tuic.service")
+    service = Path("/etc/systemd/system/tuic.service")
 
     # 设置别名
     root = Path(os.path.expanduser("~"))
@@ -175,6 +178,13 @@ class Project:
     def reset_shell() -> NoReturn:
         # Reload Linux SHELL and refresh alias values
         os.execl(os.environ["SHELL"], "bash", "-l")
+
+    @property
+    def systemd_template(self) -> str:
+        return TEMPLATE_SERVICE.format(
+            exec_start=f"{self.executable} -c {self.server_config}",
+            working_directory=f"{self.workstation}",
+        )
 
 
 @dataclass
@@ -266,7 +276,7 @@ class CertBot:
 
 
 @dataclass
-class TuicService:
+class Service:
     path: Path
     name: str = "tuic"
 
@@ -277,19 +287,19 @@ class TuicService:
             os.system("systemctl daemon-reload")
         return cls(path=path)
 
-    def download_tuic_server(self, save_path: Path):
-        save_path_ = str(save_path)
+    def download_server(self, workstation: Path):
+        ex_path = workstation.joinpath("tuic")
         try:
-            urlretrieve(URL, f"{save_path_}")
-            logging.info(f"下载完毕 - {save_path_=}")
+            urlretrieve(URL, f"{ex_path}")
+            logging.info(f"下载完毕 - ex_path={ex_path}")
         except OSError:
             logging.info("服务正忙，尝试停止任务...")
             self.stop()
             time.sleep(0.5)
-            return self.download_tuic_server(save_path)
+            return self.download_server(workstation)
         else:
-            os.system(f"chmod +x {save_path_}")
-            logging.info(f"授予执行权限 - {save_path_=}")
+            os.system(f"chmod +x {ex_path}")
+            logging.info(f"授予执行权限 - ex_path={ex_path}")
 
     def start(self):
         """部署服务之前需要先初始化服务端配置并将其写到工作空间"""
@@ -705,6 +715,8 @@ class ClashMetaConfig:
 
 
 # =================================== DataModel ===================================
+
+
 TEMPLATE_PRINT_NEKORAY = """
 \033[36m--> NekoRay 自定义核心配置\033[0m
 # 名称：(custom)
@@ -835,14 +847,12 @@ class Scaffold:
 
         # 初始化系统服务配置
         project.server_ip = server_ip
-        template = TEMPLATE_SERVICE.format(
-            exec_start=f"{project.tuic_executable} -c {project.server_config}",
-            working_directory=f"{project.workstation}",
+        service = Service.build_from_template(
+            path=project.service, template=project.systemd_template
         )
-        tuic = TuicService.build_from_template(path=project.tuic_service, template=template)
 
         logging.info(f"正在下载 tuic-server")
-        tuic.download_tuic_server(project.tuic_executable)
+        service.download_server(project.workstation)
 
         logging.info("正在生成默认的服务端配置")
         server_config = ServerConfig.from_automation(
@@ -851,10 +861,10 @@ class Scaffold:
         server_config.to_json(project.server_config)
 
         logging.info("正在部署系统服务")
-        tuic.start()
+        service.start()
 
         logging.info("正在检查服务状态")
-        (response, text) = tuic.status()
+        (response, text) = service.status()
 
         # 在控制台输出客户端配置
         if response is True:
@@ -877,7 +887,7 @@ class Scaffold:
         CertBot(domain).remove()
 
         # 关停进程，注销系统服务，移除工作空间
-        service = TuicService.build_from_template(project.tuic_service)
+        service = Service.build_from_template(project.service)
         service.remove(project.workstation)
 
         project.reset_shell()
@@ -915,23 +925,23 @@ class Scaffold:
     @staticmethod
     def service_relay(cmd: str):
         project = Project()
-        tuic = TuicService.build_from_template(path=project.tuic_service)
+        service = Service.build_from_template(path=project.service)
 
         if cmd == "status":
-            active = recv_stream(f"systemctl is-active {tuic.name}")
+            active = recv_stream(f"systemctl is-active {service.name}")
             logging.info(f"status - {active}")
-            version = recv_stream(f"{project.tuic_executable} -v")
+            version = recv_stream(f"{project.executable} -v")
             logging.info(f"version - {version}")
         elif cmd == "log":
             # FIXME unknown syslog
-            syslog = recv_stream(f"journalctl -u {tuic.name} -f -o cat")
+            syslog = recv_stream(f"journalctl -u {service.name} -f -o cat")
             print(syslog)
         elif cmd == "start":
-            tuic.start()
+            service.start()
         elif cmd == "stop":
-            tuic.stop()
+            service.stop()
         elif cmd == "restart":
-            tuic.restart()
+            service.restart()
 
 
 if __name__ == "__main__":
@@ -949,11 +959,11 @@ if __name__ == "__main__":
     check_parser.add_argument("--clash", action="store_true", help="show Clash.Meta config")
     check_parser.add_argument("--v2ray", action="store_true", help="show v2rayN config")
 
-    status_parser = subparsers.add_parser("status", help="Check juicity-service status")
-    log_parser = subparsers.add_parser("log", help="Check juicity-service syslog")
-    start_parser = subparsers.add_parser("start", help="Start juicity-service")
-    stop_parser = subparsers.add_parser("stop", help="Stop juicity-service")
-    restart_parser = subparsers.add_parser("restart", help="restart juicity-service")
+    status_parser = subparsers.add_parser("status", help="Check tuic-service status")
+    log_parser = subparsers.add_parser("log", help="Check tuic-service syslog")
+    start_parser = subparsers.add_parser("start", help="Start tuic-service")
+    stop_parser = subparsers.add_parser("stop", help="Stop tuic-service")
+    restart_parser = subparsers.add_parser("restart", help="restart tuic-service")
 
     args = parser.parse_args()
     command = args.command
