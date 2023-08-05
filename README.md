@@ -1,6 +1,6 @@
 # Tunic <a href = "https://t.me/+-Sux5u3PUpJiY2Ix"><img src="https://img.shields.io/static/v1?style=social&logo=telegram&label=chat&message=studio" ></a>
 
-Tunic 用于快速部署 [tuic-server](https://github.com/EAimTY/tuic) 并输出客户端最佳实践配置。只需 5s 即可完成全自动部署，开箱即用！
+Tunic 用于快速部署 [tuic-server](https://github.com/EAimTY/tuic) 并输出客户端最佳实践配置。只需 15s 即可完成全自动部署，开箱即用！
 
 ## Prerequisites
 
@@ -10,7 +10,7 @@ Tunic 用于快速部署 [tuic-server](https://github.com/EAimTY/tuic) 并输出
 
 ## Get started
 
-> 首次安装完毕后，你可以在新会话中通过别名指令 `tunic` 调度脚本。
+> 首次安装完毕后，你可以通过别名指令 `tunic` 调度脚本。
 
 1. **One-Click deployment**
 

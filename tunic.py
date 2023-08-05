@@ -111,7 +111,8 @@ class Project:
     tuic_service = Path("/etc/systemd/system/tuic.service")
 
     # 设置别名
-    path_bash_aliases = Path("/root/.bash_aliases")
+    root = Path(os.path.expanduser("~"))
+    path_bash_aliases = root.joinpath(".bash_aliases")
     _remote_command = "python3 <(curl -fsSL https://ros.services/tunic.py)"
     _alias = "tunic"
 
@@ -156,18 +157,24 @@ class Project:
 
     @property
     def alias(self):
+        # redirect to https://raw.githubusercontent.com/QIN2DIM/tuic-installer/main/tunic.py
         return f"alias {self._alias}='{self._remote_command}'"
 
     def set_alias(self):
         with open(self.path_bash_aliases, "a", encoding="utf8") as file:
             file.write(f"\n{self.alias}\n")
-        logging.info(f"✅ 你可以在重启会话后通过别名唤起脚本 - alias={self._alias}")
+        logging.info(f"✅ 现在你可以通过别名唤起脚本 - alias={self._alias}")
 
     def remove_alias(self):
         text = self.path_bash_aliases.read_text(encoding="utf8")
         for ck in [f"\n{self.alias}\n", f"\n{self.alias}", f"{self.alias}\n", self.alias]:
             text = text.replace(ck, "")
         self.path_bash_aliases.write_text(text, encoding="utf8")
+
+    @staticmethod
+    def reset_shell() -> NoReturn:
+        # Reload Linux SHELL and refresh alias values
+        os.execl(os.environ["SHELL"], "bash", "-l")
 
 
 @dataclass
@@ -260,15 +267,15 @@ class CertBot:
 
 @dataclass
 class TuicService:
-    path: str
+    path: Path
     name: str = "tuic"
 
     @classmethod
     def build_from_template(cls, path: Path, template: str | None = ""):
-        template = template.format()
-        path.write_text(template, encoding="utf8")
-        os.system("systemctl daemon-reload")
-        return cls(path=f"{path}")
+        if template:
+            path.write_text(template, encoding="utf8")
+            os.system("systemctl daemon-reload")
+        return cls(path=path)
 
     def download_tuic_server(self, save_path: Path):
         save_path_ = str(save_path)
@@ -294,6 +301,10 @@ class TuicService:
         logging.info("停止系统服务")
         os.system(f"systemctl stop {self.name}")
 
+    def restart(self):
+        logging.info("重启系统服务")
+        os.system(f"systemctl daemon-reload && systemctl restart {self.name}")
+
     def status(self) -> Tuple[bool, str]:
         result = subprocess.run(
             f"systemctl is-active {self.name}".split(), capture_output=True, text=True
@@ -315,7 +326,8 @@ class TuicService:
         os.system("pkill tuic")
 
         logging.info("移除系统服务配置文件")
-        os.remove(self.path)
+        if self.path.exists():
+            os.remove(self.path)
 
         logging.info("移除工作空间")
         shutil.rmtree(workstation)
@@ -350,118 +362,113 @@ class ServerConfig:
     https://github.com/EAimTY/tuic/tree/dev/tuic-server
     """
 
+    server: str
     """
     The socket address to listen on
     """
-    server: str
 
+    users: Dict[str, str]
     """
     User map, contains user UUID and password
     """
-    users: Dict[str, str]
 
+    certificate: str
+    private_key: str
     """
     The path to the private key file and cert file
     """
-    certificate: str
-    private_key: str
 
+    congestion_control: Literal["cubic", "new_reno", "bbr"] = "bbr"
     """
     [Optional] Congestion control algorithm
     Default: "cubic"
     """
-    congestion_control: Literal["cubic", "new_reno", "bbr"] = "bbr"
 
+    alpn: List[str] | None = field(default_factory=list)
     """
     # [Optional] Application layer protocol negotiation
     # Default being empty (no ALPN)
     """
-    alpn: List[str] | None = field(default_factory=list)
 
+    udp_relay_ipv6: bool = True
     """
     # Optional. If the server should create separate UDP sockets for relaying IPv6 UDP packets
     # Default: true
     """
-    udp_relay_ipv6: bool = True
 
+    zero_rtt_handshake: bool = True
     """
     # Optional. Enable 0-RTT QUIC connection handshake on the server side
     # This is not impacting much on the performance, as the protocol is fully multiplexed
     # WARNING: Disabling this is highly recommended, as it is vulnerable to replay attacks. See https://blog.cloudflare.com/even-faster-connection-establishment-with-quic-0-rtt-resumption/#attack-of-the-clones
     # Default: false
     """
-    zero_rtt_handshake: bool = True
 
+    dual_stack: bool | None = None
     """
     [Optional] Set if the listening socket should be dual-stack
     If this option is not set, the socket behavior is platform dependent
     """
-    dual_stack: bool | None = None
 
+    auth_timeout: str = "3s"
     """
     [Optional] How long the server should wait for the client to send the authentication command
     Default: 3s
     """
-    auth_timeout: str = "3s"
 
+    task_negotiation_timeout: str = "3s"
     """
     [Optional] Maximum duration server expects for task negotiation
     Default: 3s
     """
-    task_negotiation_timeout: str = "3s"
 
+    max_idle_time: str = "10s"
     """
     [Optional] How long the server should wait before closing an idle connection
     Default: 10s
     """
-    max_idle_time: str = "10s"
 
+    max_external_packet_size: int = 1500
     """
     [Optional] Maximum packet size the server can receive from outbound UDP sockets, in bytes
     Default: 1500
     """
-    max_external_packet_size: int = 1500
 
+    send_window: int = 16777216
     """
     [Optional] Maximum number of bytes to transmit to a peer without acknowledgment
     Should be set to at least the expected connection latency multiplied by the maximum desired throughput
     Default: 8MiB * 2
     """
-    send_window: int = 16777216
 
+    receive_window: int = 8388608
     """
     [Optional]. Maximum number of bytes the peer may transmit without acknowledgement on any one stream before becoming blocked
     Should be set to at least the expected connection latency multiplied by the maximum desired throughput
     Default: 8MiB
     """
-    receive_window: int = 8388608
 
+    gc_interval: str = "3s"
     """
     [Optional] Interval between UDP packet fragment garbage collection
     Default: 3s
     """
-    gc_interval: str = "3s"
 
+    gc_lifetime: str = "15s"
     """
     [Optional] How long the server should keep a UDP packet fragment. Outdated fragments will be dropped
     Default: 15s
     """
-    gc_lifetime: str = "15s"
 
+    log_level: Literal["warn", "info", "debug", "error"] = "warn"
     """
     [Optional] Set the log level
     Default: "warn"
     """
-    log_level: Literal["warn", "info", "debug", "error"] = "warn"
 
     def __post_init__(self):
         self.server = self.server or "[::]:443"
         self.alpn = self.alpn or ["h3", "spdy/3.1"]
-
-    @classmethod
-    def from_json(cls, fp: Path):
-        data = json.loads(fp.read_text(encoding="utf8"))
-        return from_dict_to_cls(cls, data)
 
     @classmethod
     def from_automation(
@@ -482,30 +489,31 @@ class ServerConfig:
 class ClientRelay:
     """Settings for the outbound TUIC proxy"""
 
+    server: str
     """
     // Format: "HOST:PORT"
     // The HOST must be a common name in the certificate
     // If the "ip" field in the "relay" section is not set, the HOST is also used for DNS resolving
     """
-    server: str
 
+    uuid: str
+    password: str
     """
     TUIC User Object
     """
-    uuid: str
-    password: str
 
+    ip: str | None = None
     """
     // Optional. The IP address of the TUIC proxy server, for overriding DNS resolving
     // If not set, the HOST in the "server" field is used for DNS resolving
     """
-    ip: str | None = None
 
+    certificates: List[str] | None = field(default_factory=list)
     """
     Because this script implements the steps of automatic certificate application, this parameter will never be used.
     """
-    certificates: List[str] | None = field(default_factory=list)
 
+    udp_relay_mode: Literal["native", "quic"] = "quic"
     """
     // Optional. Set the UDP packet relay mode
     // Can be:
@@ -513,54 +521,53 @@ class ClientRelay:
     // - "quic": lossless UDP relay using QUIC streams, additional overhead is introduced
     // Default: "native"
     """
-    udp_relay_mode: Literal["native", "quic"] = "quic"
 
+    congestion_control: Literal["cubic", "new_reno", "bbr"] = "bbr"
     """
     // Optional. Congestion control algorithm, available options:
     // "cubic", "new_reno", "bbr"
     // Default: "cubic"
     """
-    congestion_control: Literal["cubic", "new_reno", "bbr"] = "bbr"
 
+    alpn: List[str] | None = field(default_factory=list)
     """
     // Optional. Application layer protocol negotiation
     // Default being empty (no ALPN)
     """
-    alpn: List[str] | None = field(default_factory=list)
 
+    zero_rtt_handshake: bool = True
     """
     // Optional. Enable 0-RTT QUIC connection handshake on the client side
     // This is not impacting much on the performance, as the protocol is fully multiplexed
     // WARNING: Disabling this is highly recommended, as it is vulnerable to replay attacks. See https://blog.cloudflare.com/even-faster-connection-establishment-with-quic-0-rtt-resumption/#attack-of-the-clones
     // Default: false
     """
-    zero_rtt_handshake: bool = True
 
+    send_window: int = 16777216
     """
     [Optional] Maximum number of bytes to transmit to a peer without acknowledgment
     Should be set to at least the expected connection latency multiplied by the maximum desired throughput
     Default: 8MiB * 2 
     """
-    send_window: int = 16777216
 
+    receive_window: int = 8388608
     """
     [Optional]. Maximum number of bytes the peer may transmit without acknowledgement on any one stream before becoming blocked
     Should be set to at least the expected connection latency multiplied by the maximum desired throughput
     Default: 8MiB 
     """
-    receive_window: int = 8388608
 
+    gc_interval: str = "3s"
     """
     [Optional] Interval between UDP packet fragment garbage collection
     Default: 3s
     """
-    gc_interval: str = "3s"
 
+    gc_lifetime: str = "15s"
     """
     [Optional] How long the server should keep a UDP packet fragment. Outdated fragments will be dropped
     Default: 15s
     """
-    gc_lifetime: str = "15s"
 
     def __post_init__(self):
         self.alpn = self.alpn or ["h3", "spdy/3.1"]
@@ -632,6 +639,11 @@ class NekoRayConfig:
     @property
     def showcase(self) -> str:
         return json.dumps(self.__dict__, indent=4, ensure_ascii=True)
+
+    @property
+    def serv_peer(self) -> Tuple[str, str]:
+        serv_addr, serv_port = self.relay.get("server", "").split(":")
+        return serv_addr, serv_port
 
 
 @dataclass
@@ -710,6 +722,17 @@ TEMPLATE_PRINT_META = """
 """
 
 
+class Template:
+    @staticmethod
+    def print_nekoray(nekoray: NekoRayConfig):
+        serv_addr, serv_port = nekoray.serv_peer
+        print(
+            TEMPLATE_PRINT_NEKORAY.format(
+                server_addr=serv_addr, listen_port=serv_port, nekoray_config=nekoray.showcase
+            )
+        )
+
+
 def gen_clients(server_addr: str, user: User, server_config: ServerConfig, project: Project):
     """
     client: Literal["NekoRay", "v2rayN", "Meta"]
@@ -730,11 +753,7 @@ def gen_clients(server_addr: str, user: User, server_config: ServerConfig, proje
     # https://matsuridayo.github.io/n-extra_core/
     nekoray = NekoRayConfig.from_server(relay, server_addr, server_port, server_ip)
     nekoray.to_json(project.client_nekoray_config)
-    print(
-        TEMPLATE_PRINT_NEKORAY.format(
-            server_addr=server_addr, listen_port=server_port, nekoray_config=nekoray.showcase
-        )
-    )
+    Template.print_nekoray(nekoray)
 
     # 生成 Clash.Meta 客户端配置实例
     # https://wiki.metacubex.one/config/proxies/tuic/
@@ -767,6 +786,21 @@ def _validate_domain(domain: str | None) -> Union[NoReturn, Tuple[str, str]]:
     sys.exit()
 
 
+def recv_stream(script: str, pipe: Literal["stdout", "stderr"] = "stdout") -> str:
+    p = subprocess.Popen(
+        script.split(),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+        text=True,
+    )
+    if pipe == "stdout":
+        return p.stdout.read().strip()
+    if pipe == "stderr":
+        return p.stderr.read().strip()
+
+
 class Scaffold:
     @staticmethod
     def install(params: argparse.Namespace):
@@ -775,7 +809,7 @@ class Scaffold:
         3. 初始化 Project 环境对象
         4. 初始化 server config
         5. 初始化 client config
-        6. 生成 nekoray tuic config 配置信息
+        6. 生成 client config 配置信息
         :param params:
         :return:
         """
@@ -825,8 +859,9 @@ class Scaffold:
         # 在控制台输出客户端配置
         if response is True:
             gen_clients(domain, user, server_config, project)
+            project.reset_shell()
         else:
-            logging.info(f"{text}")
+            logging.info(f"服务启动失败 - status={text}")
 
     @staticmethod
     def remove(params: argparse.Namespace):
@@ -842,7 +877,10 @@ class Scaffold:
         CertBot(domain).remove()
 
         # 关停进程，注销系统服务，移除工作空间
-        TuicService.build_from_template(project.tuic_service).remove(project.workstation)
+        service = TuicService.build_from_template(project.tuic_service)
+        service.remove(project.workstation)
+
+        project.reset_shell()
 
     @staticmethod
     def check(params: argparse.Namespace):
@@ -851,14 +889,7 @@ class Scaffold:
                 logging.error(f"❌ 客户端配置文件不存在 - path={project.client_nekoray_config}")
             else:
                 nekoray = NekoRayConfig.from_json(project.client_nekoray_config)
-                server_addr, server_port = nekoray.relay.get("server", "").split(":")
-                print(
-                    TEMPLATE_PRINT_NEKORAY.format(
-                        server_addr=server_addr,
-                        listen_port=server_port,
-                        nekoray_config=nekoray.showcase,
-                    )
-                )
+                Template.print_nekoray(nekoray)
 
         def print_clash_meta():
             if not project.client_meta_config.exists():
@@ -881,6 +912,27 @@ class Scaffold:
         elif params.v2ray:
             logging.warning("Unimplemented feature")
 
+    @staticmethod
+    def service_relay(cmd: str):
+        project = Project()
+        tuic = TuicService.build_from_template(path=project.tuic_service)
+
+        if cmd == "status":
+            active = recv_stream(f"systemctl is-active {tuic.name}")
+            logging.info(f"status - {active}")
+            version = recv_stream(f"{project.tuic_executable} -v")
+            logging.info(f"version - {version}")
+        elif cmd == "log":
+            # FIXME unknown syslog
+            syslog = recv_stream(f"journalctl -u {tuic.name} -f -o cat")
+            print(syslog)
+        elif cmd == "start":
+            tuic.start()
+        elif cmd == "stop":
+            tuic.stop()
+        elif cmd == "restart":
+            tuic.restart()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="TUIC Scaffold (Python3.8+)")
@@ -897,6 +949,12 @@ if __name__ == "__main__":
     check_parser.add_argument("--clash", action="store_true", help="show Clash.Meta config")
     check_parser.add_argument("--v2ray", action="store_true", help="show v2rayN config")
 
+    status_parser = subparsers.add_parser("status", help="Check juicity-service status")
+    log_parser = subparsers.add_parser("log", help="Check juicity-service syslog")
+    start_parser = subparsers.add_parser("start", help="Start juicity-service")
+    stop_parser = subparsers.add_parser("stop", help="Stop juicity-service")
+    restart_parser = subparsers.add_parser("restart", help="restart juicity-service")
+
     args = parser.parse_args()
     command = args.command
 
@@ -907,5 +965,7 @@ if __name__ == "__main__":
             Scaffold.remove(params=args)
         elif command == "check":
             Scaffold.check(params=args)
+        elif command in ["status", "log", "start", "stop", "restart"]:
+            Scaffold.service_relay(command)
         else:
             parser.print_help()
