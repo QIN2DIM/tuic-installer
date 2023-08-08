@@ -177,10 +177,14 @@ class Project:
         logging.info(f"✅ 现在你可以通过别名唤起脚本 - alias={self._alias}")
 
     def remove_alias(self):
-        text = self.path_bash_aliases.read_text(encoding="utf8")
-        for ck in [f"\n{self.alias}\n", f"\n{self.alias}", f"{self.alias}\n", self.alias]:
-            text = text.replace(ck, "")
-        self.path_bash_aliases.write_text(text, encoding="utf8")
+        histories = [self.root.joinpath(".bash_aliases"), self.path_bash_aliases]
+        for hp in histories:
+            if not hp.exists():
+                continue
+            text = hp.read_text(encoding="utf8")
+            for ck in [f"\n{self.alias}\n", f"\n{self.alias}", f"{self.alias}\n", self.alias]:
+                text = text.replace(ck, "")
+            hp.write_text(text, encoding="utf8")
 
     @staticmethod
     def reset_shell() -> NoReturn:
