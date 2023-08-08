@@ -37,23 +37,11 @@ Tunic 用于快速部署 [tuic-server](https://github.com/EAimTY/tuic) 并输出
 
    默认情况下会打印所有客户端配置，但你可以通过可选的过滤指令仅输出 `NekoRay` / `clash-meta` / `sing-box` 的客户端出站配置：
 
-      - NekoRay
-
-        ```bash
-        python3 <(curl -fsSL https://ros.services/tunic.py) install --neko
-        ```
-
-      - clash-meta
-
-        ```bash
-        python3 <(curl -fsSL https://ros.services/tunic.py) install --clash
-        ```
-
-      - sing-box
-
-        ```bash
-        python3 <(curl -fsSL https://ros.services/tunic.py) install --singbox
-        ```
+   | Client                                                       | Command                                                      |
+   | ------------------------------------------------------------ | ------------------------------------------------------------ |
+   | [NekoRay](https://matsuridayo.github.io/n-extra_core/)       | `python3 <(curl -fsSL https://ros.services/tunic.py) install --neko` |
+   | [Clash.Meta](https://wiki.metacubex.one/config/proxies/tuic/) | `python3 <(curl -fsSL https://ros.services/tunic.py) install --clash` |
+   | [sing-box](https://sing-box.sagernet.org/configuration/outbound/tuic/) | `python3 <(curl -fsSL https://ros.services/tunic.py) install --singbox` |
 
    你可以配合 `-d` 指定域名实现「一键输出」的效果，如：
 
