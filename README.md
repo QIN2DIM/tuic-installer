@@ -12,7 +12,7 @@ Tunic 用于快速部署 [tuic-server](https://github.com/EAimTY/tuic) 并输出
 
 > 首次安装完毕后，你可以通过别名指令 `tunic` 调度脚本。
 
-1. **One-Click deployment**
+1. **一键部署**
 
    在交互式引导下完成部署。脚本会在任务结束后打印代理客户端配置。
    ```shell
@@ -25,7 +25,7 @@ Tunic 用于快速部署 [tuic-server](https://github.com/EAimTY/tuic) 并输出
    python3 <(curl -fsSL https://ros.services/tunic.py) install -d YOUR_DOMAIN
    ```
 
-2. **Remove loads**
+2. **移除负载**
 
    这个指令会移除与 `tuic-server` 有关的一切依赖。需要注意的是，你必须指明与 `tuic-server` 绑定的域名才能安全卸载证书。
 
@@ -33,9 +33,9 @@ Tunic 用于快速部署 [tuic-server](https://github.com/EAimTY/tuic) 并输出
    python3 <(curl -fsSL https://ros.services/tunic.py) remove
    ```
 
-3. **Common**
+3. **常用操作**
 
-   默认情况下会打印所有客户端配置，但你可以通过可选的过滤指令仅输出 `NekoRay` / `clash-meta` / `sing-box` 的客户端出站配置：
+   默认情况下会打印所有客户端配置，你可以通过可选的 `output-filter` 过滤指令仅输出 `NekoRay` / `clash-meta` / `sing-box` 的客户端出站配置：
 
    | Client                                                       | Command                                                      |
    | ------------------------------------------------------------ | ------------------------------------------------------------ |
@@ -43,16 +43,29 @@ Tunic 用于快速部署 [tuic-server](https://github.com/EAimTY/tuic) 并输出
    | [Clash.Meta](https://wiki.metacubex.one/config/proxies/tuic/) | `python3 <(curl -fsSL https://ros.services/tunic.py) install --clash` |
    | [sing-box](https://sing-box.sagernet.org/configuration/outbound/tuic/) | `python3 <(curl -fsSL https://ros.services/tunic.py) install --singbox` |
 
-   你可以配合 `-d` 指定域名实现「一键输出」的效果，如：
+   你可以配合参数 `-d DOMAIN` 实现「一键输出」的效果，如：
 
    ```bash
    python3 <(curl -fsSL https://ros.services/tunic.py) install --singbox -d YOUR_DOMAIN
    ```
 
-   首次安装后，你还可以使用别名缩写去更新（覆盖）双端配置，如：
+   首次安装后，你还可以使用别名缩写 `tunic` 更新（覆盖）双端配置，如：
 
    ```bash
    tunic install --singbox -d YOUR_DOMAIN
+   ```
+
+   所有出站配置已在 `install` 指令后生成，`output-filter` 仅影响输出到屏幕的信息，你可以用 `check` 命令去查看它们，如：
+
+   ```bash
+   tunic check
+   ```
+
+   或搭配 `output-filter` 使用，效果和上文的一致：
+
+   ```bash
+   tunic check --neko
+   ```
 
 4. **Next steps**
 
