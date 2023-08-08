@@ -4,7 +4,7 @@ Tunic 用于快速部署 [tuic-server](https://github.com/EAimTY/tuic) 并输出
 
 ## Prerequisites
 
-- Python3.8+
+- Python3.6+
 - 在管理员权限下运行
 - 提前为你的服务器解析一个域名 A 纪录
 

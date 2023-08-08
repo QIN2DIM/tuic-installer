@@ -888,11 +888,13 @@ def _validate_domain(domain: str | None) -> Union[NoReturn, Tuple[str, str]]:
     try:
         server_ip = socket.getaddrinfo(domain, None)[-1][4][0]
     except socket.gaierror:
-        logging.error(f"域名不可达或拼写错误的域名 - {domain=}")
+        logging.error(f"域名不可达或拼写错误的域名 - domain={domain}")
     else:
         my_ip = request.urlopen("http://ifconfig.me/ip").read().decode("utf8")
         if my_ip != server_ip:
-            logging.error(f"你的主机外网IP与域名解析到的IP不一致 - {my_ip=} {domain=} {server_ip=}")
+            logging.error(
+                f"你的主机外网IP与域名解析到的IP不一致 - my_ip={my_ip} domain={domain} server_ip={server_ip}"
+            )
         else:
             return domain, server_ip
 
@@ -928,7 +930,7 @@ class Scaffold:
         :return:
         """
         (domain, server_ip) = _validate_domain(params.domain)
-        logging.info(f"域名解析成功 - {domain=}")
+        logging.info(f"域名解析成功 - domain={domain}")
 
         # 初始化证书对象
         cert = Certificate(domain)
