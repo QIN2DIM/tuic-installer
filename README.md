@@ -28,11 +28,44 @@ Tunic 用于快速部署 [tuic-server](https://github.com/EAimTY/tuic) 并输出
 2. **Remove loads**
 
    这个指令会移除与 `tuic-server` 有关的一切依赖。需要注意的是，你必须指明与 `tuic-server` 绑定的域名才能安全卸载证书。
-   
+
    ```shell
    python3 <(curl -fsSL https://ros.services/tunic.py) remove
    ```
 
-3. **Next steps**
+3. **Common**
+
+   默认情况下会打印所有客户端配置，但你可以通过可选的过滤指令仅输出 `NekoRay` / `clash-meta` / `sing-box` 的客户端出站配置：
+
+      - NekoRay
+
+        ```bash
+        python3 <(curl -fsSL https://ros.services/tunic.py) install --neko
+        ```
+
+      - clash-meta
+
+        ```bash
+        python3 <(curl -fsSL https://ros.services/tunic.py) install --clash
+        ```
+
+      - sing-box
+
+        ```bash
+        python3 <(curl -fsSL https://ros.services/tunic.py) install --singbox
+        ```
+
+   你可以配合 `-d` 指定域名实现「一键输出」的效果，如：
+
+   ```bash
+   python3 <(curl -fsSL https://ros.services/tunic.py) install --singbox -d YOUR_DOMAIN
+   ```
+
+   首次安装后，你还可以使用别名缩写去更新（覆盖）双端配置，如：
+
+   ```bash
+   tunic install --singbox -d YOUR_DOMAIN
+
+4. **Next steps**
 
    查看 [项目 WiKi](https://github.com/QIN2DIM/tuic-installer/wiki/Usage) 以获取完整的技术文档🐧
