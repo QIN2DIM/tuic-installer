@@ -68,14 +68,14 @@ dns:
   prefer-h3: true
   enhanced-mode: fake-ip
   nameserver:
-    - https://dns.google/dns-query#PROXY
-    - https://security.cloudflare-dns.com/dns-query#PROXY
-    - quic://dns.adguard-dns.com
+    - "https://dns.google/dns-query#PROXY"
+    - "https://security.cloudflare-dns.com/dns-query#PROXY"
+    - "quic://dns.adguard-dns.com"
   proxy-server-nameserver:
-    - https://223.5.5.5/dns-query
+    - "https://223.5.5.5/dns-query"
   nameserver-policy:
-    geosite:cn:
-      - https://223.5.5.5/dns-query#h3=true
+    "geosite:cn":
+      - "https://223.5.5.5/dns-query#h3=true"
 rules:
   - GEOSITE,category-scholar-!cn,PROXY
   - GEOSITE,category-ads-all,REJECT
