@@ -65,6 +65,7 @@ WantedBy=multi-user.target
 TEMPLATE_META_CONFIG = """
 dns:
   enable: true
+  prefer-h3: true
   enhanced-mode: fake-ip
   nameserver:
     - "https://dns.google/dns-query#PROXY"
@@ -74,8 +75,7 @@ dns:
     - "https://223.5.5.5/dns-query"
   nameserver-policy:
     "geosite:cn":
-      - "https://223.5.5.5/dns-query"
-      # - system
+      - "https://223.5.5.5/dns-query#h3=true"
 rules:
   - GEOSITE,category-scholar-!cn,PROXY
   - GEOSITE,category-ads-all,REJECT
