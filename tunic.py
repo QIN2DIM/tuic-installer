@@ -21,7 +21,7 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Literal, List, Any, NoReturn, Union, Tuple
+from typing import Dict, Literal, List, Any, NoReturn, Tuple
 from urllib import request
 from urllib.request import urlretrieve
 from uuid import uuid4
@@ -132,7 +132,7 @@ class Project:
         proto2type = {"tcp": socket.SOCK_STREAM, "udp": socket.SOCK_DGRAM}
         socket_type = proto2type[proto]
         with suppress(socket.error), socket.socket(socket.AF_INET, socket_type) as s:
-            s.bind(("127.0.0.1", _port))
+            s.bind(("0.0.0.0", _port))
             return False
         return True
 
@@ -148,7 +148,7 @@ class Project:
     def server_port(self):
         # 初始化监听端口
         if self._server_port < 0:
-            rand_ports = list(range(41670, 46990))
+            rand_ports = list(range(49152, 59152))
             random.shuffle(rand_ports)
             for p in rand_ports:
                 if not self.is_port_in_used(p, proto="udp"):
@@ -158,6 +158,10 @@ class Project:
 
         # 返回已绑定的空闲端口
         return self._server_port
+
+    @server_port.setter
+    def server_port(self, port: int):
+        self._server_port = port
 
     @property
     def alias(self):
@@ -904,7 +908,7 @@ class Template:
 
 class Scaffold:
     @staticmethod
-    def _validate_domain(domain: str | None) -> Union[NoReturn, Tuple[str, str]]:
+    def _validate_domain(domain: str | None) -> NoReturn | Tuple[str, str]:
         """
 
         :param domain:
@@ -928,6 +932,26 @@ class Scaffold:
 
         # 域名解析错误，应当阻止用户执行安装脚本
         sys.exit()
+
+    @staticmethod
+    def _validate_port(port: int | None) -> NoReturn | int | None:
+        # No `-p` parameter specified
+        if port is None:
+            return
+
+        # Avoid conflicts with known services as much as possible
+        if port < 49152:
+            logging.error(f"指定的端口应当大于 49151 - scope=[49152, 65535]")
+            sys.exit()
+
+        # UDP port already in use
+        if Project.is_port_in_used(port, proto="udp"):
+            logging.error(f"UDP 端口已被占用 - port={port}")
+            sys.exit()
+
+        # Available port
+        logging.info(f"端口绑定成功 - port={port}")
+        return port
 
     @staticmethod
     def _recv_stream(script: str, pipe: Literal["stdout", "stderr"] = "stdout") -> str:
@@ -955,6 +979,8 @@ class Scaffold:
         :param params:
         :return:
         """
+        port = Scaffold._validate_port(params.port)
+
         (domain, server_ip) = Scaffold._validate_domain(params.domain)
         logging.info(f"域名解析成功 - domain={domain}")
 
@@ -969,10 +995,13 @@ class Scaffold:
 
         # 初始化 workstation
         project = Project()
+        user = User.gen()
+
         # 设置脚本别名
         project.set_alias()
 
-        user = User.gen()
+        # 绑定传入的端口，或随机选用未被占用的 UDP 端口
+        project.server_port = port or project.server_port
         server_port = project.server_port
 
         # 初始化系统服务配置
@@ -1063,7 +1092,8 @@ def run():
     subparsers = parser.add_subparsers(dest="command")
 
     install_parser = subparsers.add_parser("install", help="Automatically install and run")
-    install_parser.add_argument("-d", "--domain", type=str, help="传参指定域名，否则需要在运行脚本后以交互的形式输入")
+    install_parser.add_argument("-d", "--domain", type=str, help="指定域名，否则需要在运行脚本后以交互的形式输入")
+    install_parser.add_argument("-p", "--port", type=int, help="指定服务监听端口，否则随机选择未被使用的端口")
 
     remove_parser = subparsers.add_parser("remove", help="Uninstall services and associated caches")
     remove_parser.add_argument("-d", "--domain", type=str, help="传参指定域名，否则需要在运行脚本后以交互的形式输入")
