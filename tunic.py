@@ -216,7 +216,11 @@ class CertBot:
     def __init__(self, domain: str):
         self._domain = domain
 
-    def run(self):
+        self._should_revive_port_80 = False
+        self._is_success = True
+
+    def _cert_pre_hook(self):
+        # Fallback strategy: Ensure smooth flow of certificate requests
         p = Path("/etc/letsencrypt/live/")
         if p.exists():
             logging.info("移除證書殘影...")
@@ -237,18 +241,36 @@ class CertBot:
         logging.info("安装 certbot")
         os.system("apt install certbot -y > /dev/null 2>&1")
 
+        # Pre-hook strategy: stop process running in port 80
         logging.info("检查 80 端口占用")
         if Project.is_port_in_used(80, proto="tcp"):
-            # 执行温和清理
             os.system("systemctl stop nginx > /dev/null 2>&1 && nginx -s stop > /dev/null 2>&1")
             os.system("kill $(lsof -t -i:80)  > /dev/null 2>&1")
+            self._should_revive_port_80 = True
 
+    def _cert_post_hook(self):
+        # Post-hook strategy: restart process running in port 80
+        if self._should_revive_port_80:
+            os.system("systemctl restart nginx > /dev/null 2>&1")
+            self._should_revive_port_80 = False
+
+        # Exception: certs 5 per 7 days
+        if not self._is_success:
+            sys.exit()
+
+        # This operation ensures that certbot.timer is started
+        logging.info(f"运行证书续订服务 - service=certbot.timer")
+        os.system(f"systemctl daemon-reload && systemctl enable --now certbot.timer")
+
+    def _run(self):
         logging.info("开始申请证书")
         cmd = (
             "certbot certonly "
             "--standalone "
             "--register-unsafely-without-email "
             "--agree-tos "
+            "--keep "
+            "--non-interactive "
             "-d {domain}"
         )
         p = subprocess.Popen(
@@ -268,7 +290,12 @@ class CertBot:
                 在解决这个问题之前你没有必要进入到后续的安装步骤。
                 """
             )
-            sys.exit()
+            self._is_success = False
+
+    def run(self):
+        self._cert_pre_hook()
+        self._run()
+        self._cert_post_hook()
 
     def remove(self):
         """可能存在重复申请的 domain-0001"""
@@ -744,7 +771,6 @@ class SingBoxConfig:
     def from_server(
         cls, relay: ClientRelay, server_addr: str, server_port: int, server_ip: str | None = None
     ):
-        logging.info(server_addr)
         return cls(
             type="tuic",
             tag="tuic-out",
@@ -876,48 +902,48 @@ class Template:
             logging.warning("Unimplemented feature")
 
 
-def _validate_domain(domain: str | None) -> Union[NoReturn, Tuple[str, str]]:
-    """
-
-    :param domain:
-    :return: Tuple[domain, server_ip]
-    """
-    if not domain:
-        domain = input("> 解析到本机的域名：")
-
-    try:
-        server_ip = socket.getaddrinfo(domain, None)[-1][4][0]
-    except socket.gaierror:
-        logging.error(f"域名不可达或拼写错误的域名 - domain={domain}")
-    else:
-        my_ip = request.urlopen("http://ifconfig.me/ip").read().decode("utf8")
-        if my_ip != server_ip:
-            logging.error(
-                f"你的主机外网IP与域名解析到的IP不一致 - my_ip={my_ip} domain={domain} server_ip={server_ip}"
-            )
-        else:
-            return domain, server_ip
-
-    # 域名解析错误，应当阻止用户执行安装脚本
-    sys.exit()
-
-
-def recv_stream(script: str, pipe: Literal["stdout", "stderr"] = "stdout") -> str:
-    p = subprocess.Popen(
-        script.split(),
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        universal_newlines=True,
-        text=True,
-    )
-    if pipe == "stdout":
-        return p.stdout.read().strip()
-    if pipe == "stderr":
-        return p.stderr.read().strip()
-
-
 class Scaffold:
+    @staticmethod
+    def _validate_domain(domain: str | None) -> Union[NoReturn, Tuple[str, str]]:
+        """
+
+        :param domain:
+        :return: Tuple[domain, server_ip]
+        """
+        if not domain:
+            domain = input("> 解析到本机的域名：")
+
+        try:
+            server_ip = socket.getaddrinfo(domain, None)[-1][4][0]
+        except socket.gaierror:
+            logging.error(f"域名不可达或拼写错误的域名 - domain={domain}")
+        else:
+            my_ip = request.urlopen("http://ifconfig.me/ip").read().decode("utf8")
+            if my_ip != server_ip:
+                logging.error(
+                    f"你的主机外网IP与域名解析到的IP不一致 - my_ip={my_ip} domain={domain} server_ip={server_ip}"
+                )
+            else:
+                return domain, server_ip
+
+        # 域名解析错误，应当阻止用户执行安装脚本
+        sys.exit()
+
+    @staticmethod
+    def _recv_stream(script: str, pipe: Literal["stdout", "stderr"] = "stdout") -> str:
+        p = subprocess.Popen(
+            script.split(),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            text=True,
+        )
+        if pipe == "stdout":
+            return p.stdout.read().strip()
+        if pipe == "stderr":
+            return p.stderr.read().strip()
+
     @staticmethod
     def install(params: argparse.Namespace):
         """
@@ -929,7 +955,7 @@ class Scaffold:
         :param params:
         :return:
         """
-        (domain, server_ip) = _validate_domain(params.domain)
+        (domain, server_ip) = Scaffold._validate_domain(params.domain)
         logging.info(f"域名解析成功 - domain={domain}")
 
         # 初始化证书对象
@@ -981,7 +1007,7 @@ class Scaffold:
 
     @staticmethod
     def remove(params: argparse.Namespace):
-        (domain, _) = _validate_domain(params.domain)
+        (domain, _) = Scaffold._validate_domain(params.domain)
         logging.info(f"解绑服务 - bind={domain}")
 
         project = Project()
@@ -1009,13 +1035,20 @@ class Scaffold:
         service = Service.build_from_template(path=project.service)
 
         if cmd == "status":
-            active = recv_stream(f"systemctl is-active {service.name}")
-            logging.info(f"status - {active}")
-            version = recv_stream(f"{project.executable} -v")
-            logging.info(f"version - {version}")
+            active = Scaffold._recv_stream(f"systemctl is-active {service.name}")
+            logging.info(f"TUIC 服务状态：{active}")
+            version = Scaffold._recv_stream(f"{project.executable} -v")
+            logging.info(f"TUIC 服务版本：{version}")
+            ct_active = Scaffold._recv_stream("systemctl is-active certbot.timer")
+            logging.info(f"证书续订服务状态：{ct_active}")
+            logging.info(f"服務端配置：{project.server_config}")
+            logging.info(f"客戶端配置[NekoRay]：{project.client_nekoray_config}")
+            logging.info(f"客戶端配置[Clash.Meta]：{project.client_meta_config}")
+            logging.info(f"客戶端配置[sing-box]：{project.client_singbox_config}")
+            logging.info(f"TUIC 系统服务配置：{project.service}")
         elif cmd == "log":
             # FIXME unknown syslog
-            syslog = recv_stream(f"journalctl -u {service.name} -f -o cat")
+            syslog = Scaffold._recv_stream(f"journalctl -u {service.name} -f -o cat")
             print(syslog)
         elif cmd == "start":
             service.start()
@@ -1025,7 +1058,7 @@ class Scaffold:
             service.restart()
 
 
-if __name__ == "__main__":
+def run():
     parser = argparse.ArgumentParser(description="TUIC Scaffold (Python3.8+)")
     subparsers = parser.add_subparsers(dest="command")
 
@@ -1037,11 +1070,11 @@ if __name__ == "__main__":
 
     check_parser = subparsers.add_parser("check", help="Print client configuration")
 
-    status_parser = subparsers.add_parser("status", help="Check tuic-service status")
-    log_parser = subparsers.add_parser("log", help="Check tuic-service syslog")
-    start_parser = subparsers.add_parser("start", help="Start tuic-service")
-    stop_parser = subparsers.add_parser("stop", help="Stop tuic-service")
-    restart_parser = subparsers.add_parser("restart", help="restart tuic-service")
+    subparsers.add_parser("status", help="Check tuic-service status")
+    subparsers.add_parser("log", help="Check tuic-service syslog")
+    subparsers.add_parser("start", help="Start tuic-service")
+    subparsers.add_parser("stop", help="Stop tuic-service")
+    subparsers.add_parser("restart", help="restart tuic-service")
 
     for c in [check_parser, install_parser]:
         c.add_argument("--nekoray", action="store_true", help="show NekoRay config")
@@ -1063,3 +1096,7 @@ if __name__ == "__main__":
             Scaffold.service_relay(command)
         else:
             parser.print_help()
+
+
+if __name__ == "__main__":
+    run()
