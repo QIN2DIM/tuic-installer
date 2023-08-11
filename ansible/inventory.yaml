@@ -1,3 +1,6 @@
 kvm:
   hosts:
     localhost:
+      tunic_domain: YOUR_DOMAIN
+  vars:
+    ansible_user: root
