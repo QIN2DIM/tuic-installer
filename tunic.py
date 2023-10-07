@@ -21,9 +21,8 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Literal, List, Any, NoReturn, Tuple
-from urllib import request
-from urllib.request import urlretrieve
+from typing import Dict, Literal, List, Any, NoReturn, Tuple, Union
+from urllib.request import urlretrieve, urlopen
 from uuid import uuid4
 
 logging.basicConfig(
@@ -104,19 +103,21 @@ proxy-groups:
 
 @dataclass
 class Project:
-    workstation = Path("/home/tuic-server")
-    executable = workstation.joinpath("tuic")
-    server_config = workstation.joinpath("server_config.json")
+    workstation_dir = Path("/home/tuic-server")
+    executable_path = workstation_dir.joinpath("tuic")
+    server_config_path = workstation_dir.joinpath("server_config.json")
 
-    client_nekoray_config = workstation.joinpath("nekoray_config.json")
-    client_meta_config = workstation.joinpath("meta_config.yaml")
-    client_singbox_config = workstation.joinpath("singbox_config.json")
+    nekoray_config_path = workstation_dir.joinpath("nekoray_config.json")
+    singbox_config_path = workstation_dir.joinpath("singbox_config.json")
+    clash_meta_config_path = workstation_dir.joinpath("meta_config.yaml")
 
-    service = Path("/etc/systemd/system/tuic.service")
+    service_path = Path("/etc/systemd/system/tuic.service")
+
+    cert_path_log = workstation_dir.joinpath("cert_path_log.json")
 
     # 设置别名
-    root = Path(os.path.expanduser("~"))
-    path_bash_aliases = root.joinpath(".bashrc")
+    root_dir = Path(os.path.expanduser("~"))
+    bash_aliases_path = root_dir.joinpath(".bashrc")
     _remote_command = "python3 <(curl -fsSL https://ros.services/tunic.py)"
     _alias = "tunic"
 
@@ -124,7 +125,7 @@ class Project:
     _server_port = -1
 
     def __post_init__(self):
-        os.makedirs(self.workstation, exist_ok=True)
+        os.makedirs(self.workstation_dir, exist_ok=True)
 
     @staticmethod
     def is_port_in_used(_port: int, proto: Literal["tcp", "udp"]) -> bool | None:
@@ -132,7 +133,7 @@ class Project:
         proto2type = {"tcp": socket.SOCK_STREAM, "udp": socket.SOCK_DGRAM}
         socket_type = proto2type[proto]
         with suppress(socket.error), socket.socket(socket.AF_INET, socket_type) as s:
-            s.bind(("0.0.0.0", _port))
+            s.bind(("127.0.0.1", _port))
             return False
         return True
 
@@ -146,7 +147,6 @@ class Project:
 
     @property
     def server_port(self):
-        # 初始化监听端口
         if self._server_port < 0:
             rand_ports = list(range(49152, 59152))
             random.shuffle(rand_ports)
@@ -169,19 +169,17 @@ class Project:
         return f"alias {self._alias}='{self._remote_command}'"
 
     def set_alias(self):
-        # Avoid adding tunic alias repeatedly
-        if self.path_bash_aliases.exists():
-            pre_text = self.path_bash_aliases.read_text(encoding="utf8")
+        if self.bash_aliases_path.exists():
+            pre_text = self.bash_aliases_path.read_text(encoding="utf8")
             for ck in [f"\n{self.alias}\n", f"\n{self.alias}", f"{self.alias}\n", self.alias]:
                 if ck in pre_text:
                     return
-        # New `tunic` alias record
-        with open(self.path_bash_aliases, "a", encoding="utf8") as file:
+        with open(self.bash_aliases_path, "a", encoding="utf8") as file:
             file.write(f"\n{self.alias}\n")
         logging.info(f"✅ 现在你可以通过别名唤起脚本 - alias={self._alias}")
 
     def remove_alias(self):
-        histories = [self.root.joinpath(".bash_aliases"), self.path_bash_aliases]
+        histories = [self.root_dir.joinpath(".bash_aliases"), self.bash_aliases_path]
         for hp in histories:
             if not hp.exists():
                 continue
@@ -198,22 +196,40 @@ class Project:
     @property
     def systemd_template(self) -> str:
         return TEMPLATE_SERVICE.format(
-            exec_start=f"{self.executable} -c {self.server_config}",
-            working_directory=f"{self.workstation}",
+            exec_start=f"{self.executable_path} -c {self.server_config_path}",
+            working_directory=f"{self.workstation_dir}",
         )
+
+    def log_cert(self, cert: Certificate):
+        msg = {"fullchain": cert.fullchain, "privkey": cert.privkey}
+        self.cert_path_log.write_text(json.dumps(msg))
 
 
 @dataclass
 class Certificate:
     domain: str
+    _fullchain = ""
+    _privkey = ""
+
+    def __post_init__(self):
+        self._fullchain = f"/etc/letsencrypt/live/{self.domain}/fullchain.pem"
+        self._privkey = f"/etc/letsencrypt/live/{self.domain}/privkey.pem"
 
     @property
     def fullchain(self):
-        return f"/etc/letsencrypt/live/{self.domain}/fullchain.pem"
+        return self._fullchain
+
+    @fullchain.setter
+    def fullchain(self, cert_path: Path):
+        self._fullchain = str(cert_path)
 
     @property
     def privkey(self):
-        return f"/etc/letsencrypt/live/{self.domain}/privkey.pem"
+        return self._privkey
+
+    @privkey.setter
+    def privkey(self, key_path: Path):
+        self._privkey = str(key_path)
 
 
 class CertBot:
@@ -352,7 +368,7 @@ class Service:
 
     def stop(self):
         logging.info("停止系统服务")
-        os.system(f"systemctl stop {self.name}")
+        os.system(f"systemctl stop {self.name} > /dev/null 2>&1")
 
     def restart(self):
         logging.info("重启系统服务")
@@ -405,7 +421,7 @@ class User:
 
     @classmethod
     def gen(cls):
-        return cls(username=str(uuid4()), password=secrets.token_hex()[:16])
+        return cls(username=str(uuid4()), password=secrets.token_hex()[:32])
 
 
 @dataclass
@@ -815,8 +831,8 @@ TEMPLATE_PRINT_NEKORAY = """
 # 名称：(custom)
 # 地址：{server_addr}
 # 端口：{listen_port}
-# 命令：-c %config%
 # 核心：tuic
+# 命令：-c %config%
 
 {nekoray_config}
 """
@@ -848,23 +864,23 @@ class Template:
         # 生成 NekoRay 客户端配置实例
         # https://matsuridayo.github.io/n-extra_core/
         nekoray = NekoRayConfig.from_server(relay, server_addr, server_port, server_ip)
-        nekoray.to_json(project.client_nekoray_config)
+        nekoray.to_json(project.nekoray_config_path)
 
         # 生成 Clash.Meta 客户端配置实例
         # https://wiki.metacubex.one/config/proxies/tuic/
         meta = ClashMetaConfig.from_server(relay, server_addr, server_port, server_ip)
-        meta.to_yaml(project.client_meta_config)
+        meta.to_yaml(project.clash_meta_config_path)
 
         # 生成 sing-box 客户端出站配置
         # https://sing-box.sagernet.org/configuration/outbound/tuic/
         singbox = SingBoxConfig.from_server(relay, server_addr, server_port, server_ip)
-        singbox.to_json(project.client_singbox_config)
+        singbox.to_json(project.singbox_config_path)
 
     def print_nekoray(self):
-        if not self.project.client_nekoray_config.exists():
-            logging.error(f"❌ 客户端配置文件不存在 - path={self.project.client_nekoray_config}")
+        if not self.project.nekoray_config_path.exists():
+            logging.error(f"❌ 客户端配置文件不存在 - path={self.project.nekoray_config_path}")
         else:
-            nekoray = NekoRayConfig.from_json(self.project.client_nekoray_config)
+            nekoray = NekoRayConfig.from_json(self.project.nekoray_config_path)
             serv_addr, serv_port = nekoray.serv_peer
             print(
                 TEMPLATE_PRINT_NEKORAY.format(
@@ -874,20 +890,20 @@ class Template:
 
     def print_clash_meta(self, mode: Literal["install", "check"] = None):
         self.mode = mode or self.mode
-        if not self.project.client_meta_config.exists():
-            logging.error(f"❌ 客户端配置文件不存在 - path={self.project.client_meta_config}")
+        if not self.project.clash_meta_config_path.exists():
+            logging.error(f"❌ 客户端配置文件不存在 - path={self.project.clash_meta_config_path}")
         elif self.mode == "install":
-            print(TEMPLATE_PRINT_META.format(meta_path=self.project.client_meta_config))
+            print(TEMPLATE_PRINT_META.format(meta_path=self.project.clash_meta_config_path))
         elif self.mode == "check":
-            print(TEMPLATE_PRINT_META.format(meta_path=self.project.client_meta_config))
+            print(TEMPLATE_PRINT_META.format(meta_path=self.project.clash_meta_config_path))
             print("\033[36m--> Clash.Meta 配置信息\033[0m")
-            print(self.project.client_meta_config.read_text())
+            print(self.project.clash_meta_config_path.read_text())
 
     def print_singbox(self):
-        if not self.project.client_nekoray_config.exists():
-            logging.error(f"❌ 客户端配置文件不存在 - path={self.project.client_nekoray_config}")
+        if not self.project.nekoray_config_path.exists():
+            logging.error(f"❌ 客户端配置文件不存在 - path={self.project.nekoray_config_path}")
         else:
-            singbox = SingBoxConfig.from_json(self.project.client_singbox_config)
+            singbox = SingBoxConfig.from_json(self.project.singbox_config_path)
             print(TEMPLATE_PRINT_SINGBOX.format(singbox_config=singbox.showcase))
 
     def parse(self, params: argparse):
@@ -908,27 +924,41 @@ class Template:
 
 class Scaffold:
     @staticmethod
-    def _validate_domain(domain: str | None) -> NoReturn | Tuple[str, str]:
+    def _validate_domain(domain: str | None) -> Union[NoReturn, Tuple[str, str]]:
         """
-
+        # Check dualstack: socket.getaddrinfo(DOMAIN, PORT=None)
+        # Check only IPv4: socket.gethostbyname(DOMAIN)
+        addrs = socket.getaddrinfo(domain, None)
+            for info in addrs:
+                ip = info[4][0]
+                if ":" not in ip:
+                    server_ipv4 = ip
+            server_ip = server_ipv4
         :param domain:
         :return: Tuple[domain, server_ip]
         """
         if not domain:
             domain = input("> 解析到本机的域名：")
 
+        server_ipv4, my_ip = "", ""
+
+        # 查詢傳入的域名鏈接的端點 IPv4
         try:
-            server_ip = socket.getaddrinfo(domain, None)[-1][4][0]
+            server_ipv4 = socket.gethostbyname(domain)
         except socket.gaierror:
             logging.error(f"域名不可达或拼写错误的域名 - domain={domain}")
-        else:
-            my_ip = request.urlopen("http://ifconfig.me/ip").read().decode("utf8")
-            if my_ip != server_ip:
-                logging.error(
-                    f"你的主机外网IP与域名解析到的IP不一致 - my_ip={my_ip} domain={domain} server_ip={server_ip}"
-                )
-            else:
-                return domain, server_ip
+
+        # 查詢本機訪問公網的 IPv4
+        response = urlopen("https://ifconfig.me")
+        my_ip = response.read().decode("utf-8") or my_ip
+
+        # 判斷傳入的域名是否链接到本机 fixme
+        if my_ip == server_ipv4 or ":" in my_ip:
+            return domain, server_ipv4
+
+        logging.error(
+            f"你的主机外网IP与域名解析到的IP不一致 - my_ip={my_ip} domain={domain} server_ip={server_ipv4}"
+        )
 
         # 域名解析错误，应当阻止用户执行安装脚本
         sys.exit()
@@ -1007,17 +1037,17 @@ class Scaffold:
         # 初始化系统服务配置
         project.server_ip = server_ip
         service = Service.build_from_template(
-            path=project.service, template=project.systemd_template
+            path=project.service_path, template=project.systemd_template
         )
 
         logging.info(f"正在下载 tuic-server")
-        service.download_server(project.workstation)
+        service.download_server(project.workstation_dir)
 
         logging.info("正在生成默认的服务端配置")
         server_config = ServerConfig.from_automation(
             user, cert.fullchain, cert.privkey, server_port
         )
-        server_config.to_json(project.server_config)
+        server_config.to_json(project.server_config_path)
 
         logging.info("正在部署系统服务")
         service.start()
@@ -1048,8 +1078,8 @@ class Scaffold:
         CertBot(domain).remove()
 
         # 关停进程，注销系统服务，移除工作空间
-        service = Service.build_from_template(project.service)
-        service.remove(project.workstation)
+        service = Service.build_from_template(project.service_path)
+        service.remove(project.workstation_dir)
 
         project.reset_shell()
 
@@ -1061,20 +1091,21 @@ class Scaffold:
     @staticmethod
     def service_relay(cmd: str):
         project = Project()
-        service = Service.build_from_template(path=project.service)
+        service = Service.build_from_template(path=project.service_path)
 
         if cmd == "status":
+            os.system("clear")
             active = Scaffold._recv_stream(f"systemctl is-active {service.name}")
             logging.info(f"TUIC 服务状态：{active}")
-            version = Scaffold._recv_stream(f"{project.executable} -v")
+            version = Scaffold._recv_stream(f"{project.executable_path} -v")
             logging.info(f"TUIC 服务版本：{version}")
             ct_active = Scaffold._recv_stream("systemctl is-active certbot.timer")
             logging.info(f"证书续订服务状态：{ct_active}")
-            logging.info(f"服務端配置：{project.server_config}")
-            logging.info(f"客戶端配置[NekoRay]：{project.client_nekoray_config}")
-            logging.info(f"客戶端配置[Clash.Meta]：{project.client_meta_config}")
-            logging.info(f"客戶端配置[sing-box]：{project.client_singbox_config}")
-            logging.info(f"TUIC 系统服务配置：{project.service}")
+            logging.info(f"服務端配置：{project.server_config_path}")
+            logging.info(f"客戶端配置[NekoRay]：{project.nekoray_config_path}")
+            logging.info(f"客戶端配置[Clash.Meta]：{project.clash_meta_config_path}")
+            logging.info(f"客戶端配置[sing-box]：{project.singbox_config_path}")
+            logging.info(f"TUIC 系统服务配置：{project.service_path}")
         elif cmd == "log":
             # FIXME unknown syslog
             syslog = Scaffold._recv_stream(f"journalctl -u {service.name} -f -o cat")

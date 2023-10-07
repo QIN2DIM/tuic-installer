@@ -1,0 +1,23 @@
+- name: Deploy tuic-server on managed nodes
+  hosts: kvm
+  become: true
+  tasks:
+    - name: Install certbot with package manager
+      package:
+        name: certbot
+        state: latest
+    - name: Tunic GET
+      get_url:
+        url: https://raw.githubusercontent.com/QIN2DIM/tuic-installer/main/tunic.py
+        dest: /tmp/tunic.py
+    - name: Tunic install
+      command: "python3 /tmp/tunic.py install -d {{ tunic_domain }} -p {{ tunic_port }}"
+      register: install_result
+    - name: Check result of local deployment
+      debug:
+        var: install_result.stdout_lines
+- name: Merge Clash.Meta configuration
+  hosts: kvm
+  become: true
+  tasks:
+    - name:

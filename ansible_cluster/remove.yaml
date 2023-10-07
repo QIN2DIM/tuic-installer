@@ -1,8 +1,6 @@
-- name: Deploy tuic-server on single control node
-  hosts: localhost
+- name: Remove tuic-server on managed nodes
+  hosts: kvm
   become: true
-  vars:
-    ansible_connection: local
   tasks:
     - name: Install certbot with package manager
       package:
@@ -12,9 +10,9 @@
       get_url:
         url: https://raw.githubusercontent.com/QIN2DIM/tuic-installer/main/tunic.py
         dest: /tmp/tunic.py
-    - name: Tunic install
-      command: "python3 /tmp/tunic.py install -d {{ tunic_domain }}"
-      register: install_result
+    - name: Tunic Remove
+      command: "python3 /tmp/tunic.py remove -d {{ tunic_domain }}"
+      register: remove_result
     - name: Check result of local deployment
       debug:
-        var: install_result.stdout_lines
+        var: remove_result.stdout_lines

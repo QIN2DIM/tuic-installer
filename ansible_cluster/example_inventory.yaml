@@ -1,0 +1,12 @@
+kvm:
+  hosts:
+    localhost:
+      tunic_domain: bind.example.com
+      ansible_connection: local
+    us01:
+      tunic_domain: us01.example.fff
+    hk01:
+      tunic_domain: hk01.example.fff
+  vars:
+    ansible_user: root
+    tunic_port: 59159
